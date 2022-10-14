@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use bitpacking::{BitPacker, BitPacker4x};
+use fnv::{FnvHashMap, FnvHashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
@@ -19,7 +20,7 @@ fn main() -> Result<()> {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file());
 
-    let mut combined: BTreeMap<Trigram, Vec<(u32, BTreeSet<Trigram>)>> = BTreeMap::new();
+    let mut combined: BTreeMap<Trigram, Vec<(u32, FnvHashSet<Trigram>)>> = BTreeMap::new();
 
     let mut contents = Vec::new();
     let mut total_content_size = 0;
@@ -46,7 +47,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut trigram_ids = BTreeMap::new();
+    let mut trigram_ids = FnvHashMap::default();
     for (id, trigram) in combined.keys().enumerate() {
         trigram_ids.insert(*trigram, id as u32);
     }
@@ -107,7 +108,7 @@ fn main() -> Result<()> {
 
         for (id, successors) in docs.into_iter() {
             doc_ids.push(id);
-            doc_lens.push(successors.len() as u32);
+            doc_lens.push(successors.len() as u32 - 1);
 
             let last_successor_id = successor_ids.last().cloned().unwrap_or(0);
             successor_ids.extend(successors.into_iter().map(|s| {
@@ -164,15 +165,15 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn file_trigrams(content: &[u8]) -> BTreeMap<Trigram, BTreeSet<Trigram>> {
-    let mut res: BTreeMap<Trigram, BTreeSet<Trigram>> = BTreeMap::new();
+fn file_trigrams(content: &[u8]) -> BTreeMap<Trigram, FnvHashSet<Trigram>> {
+    let mut res: BTreeMap<Trigram, FnvHashSet<Trigram>> = BTreeMap::new();
     let mut add_trigrams = |t1: Trigram, t2: Trigram| {
         match res.get_mut(&t1) {
             Some(s) => {
                 s.insert(t2);
             }
             None => {
-                let mut s = BTreeSet::new();
+                let mut s = FnvHashSet::default();
                 s.insert(t2);
                 res.insert(t1, s);
             }
@@ -192,21 +193,21 @@ fn file_trigrams(content: &[u8]) -> BTreeMap<Trigram, BTreeSet<Trigram>> {
             // add_trigrams([*b, *c, *d], [*e, 0xFF, 0xFF]);
             // add_trigrams([*c, *d, *e], [0xFF, 0xFF, 0xFF]);
             // drop(add_trigrams);
-            res.insert([*a, *b, 0xFF], BTreeSet::new());
-            res.insert([*b, 0xFF, 0xFF], BTreeSet::new());
-            res.insert([0xFF, 0xFF, 0xFF], BTreeSet::new());
+            res.insert([*a, *b, 0xFF], FnvHashSet::default());
+            res.insert([*b, 0xFF, 0xFF], FnvHashSet::default());
+            res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
         }
         [.., b, _, _, _] => {
             // add_trigrams([*b, *c, *d], [*e, 0xFF, 0xFF]);
             // add_trigrams([*c, *d, *e], [0xFF, 0xFF, 0xFF]);
             // drop(add_trigrams);
-            res.insert([*b, 0xFF, 0xFF], BTreeSet::new());
-            res.insert([0xFF, 0xFF, 0xFF], BTreeSet::new());
+            res.insert([*b, 0xFF, 0xFF], FnvHashSet::default());
+            res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
         }
         [..] => {
             // add_trigrams([*c, *d, *e], [0xFF, 0xFF, 0xFF]);
             // drop(add_trigrams);
-            res.insert([0xFF, 0xFF, 0xFF], BTreeSet::new());
+            res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
         }
     }
 
