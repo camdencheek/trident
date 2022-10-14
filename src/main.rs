@@ -2,15 +2,16 @@
 #![feature(split_array)]
 
 use anyhow::Result;
-use bitpacking::{BitPacker, BitPacker4x};
 use fnv::{FnvHashMap, FnvHashSet};
+use serialize::{StreamWriter, U32Compressor, U32DeltaCompressor};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     fs::File,
-    io::{BufWriter, Cursor, Read, Seek, Write},
+    io::{BufWriter, Read, Write},
 };
-use varint_rs::VarintWriter;
 use walkdir::WalkDir;
+
+mod serialize;
 
 type Trigram = [u8; 3];
 
@@ -52,110 +53,84 @@ fn main() -> Result<()> {
         trigram_ids.insert(*trigram, id as u32);
     }
 
-    let compressed_size_delta = |ints: &[u32]| -> usize {
-        let mut size = 0;
-        let bp = BitPacker4x::new();
-
-        let chunks = ints.chunks_exact(BitPacker4x::BLOCK_LEN);
-
-        let mut buffer: Cursor<Vec<u8>> =
-            Cursor::new(Vec::with_capacity(4 * chunks.remainder().len()));
-        let mut last = 0;
-        for i in chunks.remainder() {
-            buffer.write_u32_varint(*i - last).unwrap();
-            last = *i;
-        }
-        size += buffer.seek(std::io::SeekFrom::Current(0)).unwrap() as usize;
-
-        let mut compressed = [0u8; 4 * BitPacker4x::BLOCK_LEN];
-        for chunk in chunks {
-            size += bp.compress_sorted(0, &chunk, &mut compressed, bp.num_bits_sorted(0, &chunk));
-        }
-
-        size
-    };
-
-    let compressed_size = |ints: &[u32]| -> usize {
-        let mut size = 0;
-        let bp = BitPacker4x::new();
-
-        let chunks = ints.chunks_exact(BitPacker4x::BLOCK_LEN);
-
-        let mut buffer: Cursor<Vec<u8>> =
-            Cursor::new(Vec::with_capacity(4 * chunks.remainder().len()));
-        for i in chunks.remainder() {
-            buffer.write_u32_varint(*i).unwrap();
-        }
-        size += buffer.seek(std::io::SeekFrom::Current(0)).unwrap() as usize;
-
-        let mut compressed = [0u8; 4 * BitPacker4x::BLOCK_LEN];
-        for chunk in chunks {
-            size += bp.compress(&chunk, &mut compressed, bp.num_bits(&chunk));
-        }
-
-        size
-    };
-
-    let mut buf = BufWriter::new(std::io::stdout().lock());
+    let buf = &mut BufWriter::new(std::io::stdout().lock());
     let mut doc_ids = Vec::new();
     let mut doc_lens = Vec::new();
-    let mut successor_ids = Vec::new();
+    let mut unique_successor_ids: FnvHashSet<Trigram> = FnvHashSet::default();
+    let mut unique_sorted_successor_ids: Vec<u32> = Vec::new();
+    let mut successor_ids: Vec<u32> = Vec::new();
     let mut total_index_size = 0;
     for (trigram, docs) in combined.into_iter() {
         doc_ids.clear();
         doc_lens.clear();
+        unique_successor_ids.clear();
+        unique_sorted_successor_ids.clear();
         successor_ids.clear();
 
-        for (id, successors) in docs.into_iter() {
-            doc_ids.push(id);
-            doc_lens.push(successors.len() as u32 - 1);
-
-            let last_successor_id = successor_ids.last().cloned().unwrap_or(0);
-            successor_ids.extend(successors.into_iter().map(|s| {
-                trigram_ids
-                    .get(&s)
-                    .unwrap_or_else(|| panic!("unknown trigram {:?}", s))
-                    .clone()
-                    + last_successor_id
-            }))
+        for (id, successors) in &docs {
+            doc_ids.push(*id);
+            doc_lens.push(successors.len() as u32);
+            unique_successor_ids.extend(successors);
         }
 
-        write!(&mut buf, "Trigram {:?}:\n", trigram)?;
-        let doc_bytes = compressed_size_delta(&doc_ids);
+        // Convert unique successor trigrams into trigram IDs.
+        unique_sorted_successor_ids.extend(
+            unique_successor_ids
+                .iter()
+                .map(|t| trigram_ids.get(t).unwrap()),
+        );
+        unique_sorted_successor_ids.sort();
+
+        for (_, successors) in docs {
+            let last_successor_id = successor_ids.last().copied().unwrap_or(0);
+            successor_ids.extend(
+                successors
+                    .iter()
+                    .map(|s| trigram_ids.get(s).unwrap())
+                    .map(|id| unique_sorted_successor_ids.binary_search(id).unwrap() as u32)
+                    .map(|local_id| local_id + last_successor_id),
+            );
+            let l = successor_ids.len();
+            successor_ids[l - successors.len()..].sort()
+        }
+
+        write!(buf, "Trigram {:?}:\n", trigram)?;
+        let sink = &mut std::io::sink();
+        let doc_bytes = U32DeltaCompressor(&doc_ids).write_to(sink)?;
         write!(
-            &mut buf,
-            "\tDoc IDs: {} ids, {} bits, {:0.3} bits/id:\n",
+            buf,
+            "\tDoc IDs: count={}, bytes={}\n",
             doc_ids.len(),
-            doc_bytes * 8,
-            doc_bytes as f64 * 8.0 / doc_ids.len() as f64
+            doc_bytes
         )?;
-        if doc_ids.len() < 5 {
-            write!(&mut buf, "\t\t{:?}\n", doc_ids)?;
-        }
-        let doc_len_bytes = compressed_size(&doc_lens);
+        let doc_len_bytes = U32Compressor(&doc_lens).write_to(sink)?;
         write!(
-            &mut buf,
-            "\tDoc Lens: {} lens, {} bits, {:0.3} bits/len:\n",
+            buf,
+            "\tDoc lens: count={}, bytes={}\n",
             doc_lens.len(),
-            doc_len_bytes * 8,
-            doc_len_bytes as f64 * 8.0 / doc_lens.len() as f64
+            doc_len_bytes
         )?;
-        let successor_id_bytes = compressed_size_delta(&successor_ids);
+        let unique_successor_id_bytes =
+            U32DeltaCompressor(&unique_sorted_successor_ids).write_to(sink)?;
         write!(
-            &mut buf,
-            "\tSuccessor IDs: {} ids, {} bits, {:0.3} bits/id:\n",
-            successor_ids.len(),
-            successor_id_bytes * 8,
-            successor_id_bytes as f64 * 8.0 / successor_ids.len() as f64
+            buf,
+            "\tUnique successors: count={}, bytes={}\n",
+            unique_sorted_successor_ids.len(),
+            unique_successor_id_bytes
         )?;
-        if successor_ids.len() < 5 {
-            write!(&mut buf, "\t\t{:?}\n", successor_ids)?;
-        }
-        total_index_size += doc_bytes + doc_len_bytes + successor_id_bytes + 3 + 6;
+        let successor_id_bytes = U32DeltaCompressor(&successor_ids).write_to(sink)?;
+        write!(
+            buf,
+            "\tSuccessors: count={}, bytes={}\n",
+            successor_ids.len(),
+            successor_id_bytes,
+        )?;
+        total_index_size +=
+            doc_bytes + doc_len_bytes + unique_successor_id_bytes + successor_id_bytes + 3 + 6;
     }
 
     write!(
-        &mut buf,
+        buf,
         "Content size: {}, Compressed size: {}, Compression ratio: {:.3}\n",
         total_content_size,
         total_index_size,
@@ -165,8 +140,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn file_trigrams(content: &[u8]) -> BTreeMap<Trigram, FnvHashSet<Trigram>> {
-    let mut res: BTreeMap<Trigram, FnvHashSet<Trigram>> = BTreeMap::new();
+fn file_trigrams(content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
+    let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
     let mut add_trigrams = |t1: Trigram, t2: Trigram| {
         match res.get_mut(&t1) {
             Some(s) => {
@@ -189,24 +164,15 @@ fn file_trigrams(content: &[u8]) -> BTreeMap<Trigram, FnvHashSet<Trigram>> {
     drop(add_trigrams);
     match content {
         [.., a, b, _, _, _] => {
-            // add_trigrams([*a, *b, *c], [*d, *e, 0xFF]);
-            // add_trigrams([*b, *c, *d], [*e, 0xFF, 0xFF]);
-            // add_trigrams([*c, *d, *e], [0xFF, 0xFF, 0xFF]);
-            // drop(add_trigrams);
             res.insert([*a, *b, 0xFF], FnvHashSet::default());
             res.insert([*b, 0xFF, 0xFF], FnvHashSet::default());
             res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
         }
         [.., b, _, _, _] => {
-            // add_trigrams([*b, *c, *d], [*e, 0xFF, 0xFF]);
-            // add_trigrams([*c, *d, *e], [0xFF, 0xFF, 0xFF]);
-            // drop(add_trigrams);
             res.insert([*b, 0xFF, 0xFF], FnvHashSet::default());
             res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
         }
         [..] => {
-            // add_trigrams([*c, *d, *e], [0xFF, 0xFF, 0xFF]);
-            // drop(add_trigrams);
             res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
         }
     }
