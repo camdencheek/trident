@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bitpacking::{BitPacker, BitPacker1x};
+use bitpacking::{BitPacker, BitPacker4x};
 use integer_encoding::VarIntWriter;
 use std::io::{Cursor, Read, Write};
 
@@ -13,12 +13,12 @@ impl StreamWriter for U32Compressor<'_> {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
         let mut size = 0;
 
-        let mut chunks = self.0.chunks_exact(BitPacker1x::BLOCK_LEN);
+        let mut chunks = self.0.chunks_exact(BitPacker4x::BLOCK_LEN);
 
         let mut last = 0;
         {
-            let bp = BitPacker1x::new();
-            let mut buf = [0u8; 4 * BitPacker1x::BLOCK_LEN];
+            let bp = BitPacker4x::new();
+            let mut buf = [0u8; 4 * BitPacker4x::BLOCK_LEN];
             for chunk in chunks.by_ref() {
                 let n = bp.compress(&chunk, &mut buf, bp.num_bits(&chunk));
                 size += w.write(&buf[..n])?;
@@ -41,14 +41,15 @@ impl StreamWriter for U32DeltaCompressor<'_> {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
         let mut size = 0;
 
-        let mut chunks = self.0.chunks_exact(BitPacker1x::BLOCK_LEN);
+        let mut chunks = self.0.chunks_exact(BitPacker4x::BLOCK_LEN);
 
         let mut last = 0;
         {
-            let bp = BitPacker1x::new();
-            let mut buf = [0u8; 4 * BitPacker1x::BLOCK_LEN];
+            let bp = BitPacker4x::new();
+            let mut buf = [0u8; 4 * BitPacker4x::BLOCK_LEN];
             for chunk in chunks.by_ref() {
-                let n = bp.compress_sorted(0, &chunk, &mut buf, bp.num_bits_sorted(0, &chunk));
+                let n =
+                    bp.compress_sorted(last, &chunk, &mut buf, bp.num_bits_sorted(last, &chunk));
                 size += w.write(&buf[..n])?;
                 last = *chunk.last().unwrap();
             }
