@@ -15,7 +15,7 @@ mod serialize;
 type Trigram = [u8; 3];
 
 fn main() -> Result<()> {
-    let documents = WalkDir::new("/Users/camdencheek/src/sourcegraph/sourcegraph/internal")
+    let documents = WalkDir::new("/Users/camdencheek/src/linux")
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file());
@@ -34,7 +34,7 @@ fn main() -> Result<()> {
         contents.reserve(f.metadata()?.len() as usize + 3);
         f.read_to_end(&mut contents)?;
         if let Err(e) = std::str::from_utf8(&mut contents) {
-            println!("failed to read string for file {:?}: {}", entry.path(), e);
+            println!("skipping non-utf8 file {:?}: {}", entry.path(), e);
             continue;
         };
         contents.make_ascii_lowercase();
@@ -137,21 +137,6 @@ fn main() -> Result<()> {
             doc_bytes + doc_len_bytes + unique_successor_id_bytes + successor_id_bytes;
         trigram_h.increment(trigram_size as u64).unwrap();
 
-        if trigram_size > 2000000 {
-            write!(
-                buf,
-                "Big trigram: {:?} {}\n",
-                std::str::from_utf8(
-                    &trigram
-                        .iter()
-                        .copied()
-                        .flat_map(std::ascii::escape_default)
-                        .collect::<Vec<u8>>()
-                )
-                .unwrap(),
-                trigram_size
-            )?;
-        }
         total_index_size += trigram_size;
     }
 
