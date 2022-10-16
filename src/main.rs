@@ -15,7 +15,7 @@ mod serialize;
 type Trigram = [u8; 3];
 
 fn main() -> Result<()> {
-    let documents = WalkDir::new("/Users/camdencheek/src/linux")
+    let documents = WalkDir::new("/Users/camdencheek/Downloads/srcs/linux-master")
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file());
@@ -50,11 +50,6 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut trigram_ids = FnvHashMap::default();
-    for (id, trigram) in combined.keys().enumerate() {
-        trigram_ids.insert(*trigram, id as u32);
-    }
-
     let buf = &mut BufWriter::new(std::io::stdout().lock());
     let mut doc_ids = Vec::new();
     let mut doc_ids_len_h = Histogram::new();
@@ -62,7 +57,7 @@ fn main() -> Result<()> {
     let mut doc_lens = Vec::new();
     let mut doc_lens_len_h = Histogram::new();
     let mut doc_lens_bytes_h = Histogram::new();
-    let mut unique_successor_ids: FnvHashSet<Trigram> = FnvHashSet::default();
+    let mut unique_successors: FnvHashSet<Trigram> = FnvHashSet::default();
     let mut unique_sorted_successor_ids: Vec<u32> = Vec::new();
     let mut unique_len_h = Histogram::new();
     let mut unique_bytes_h = Histogram::new();
@@ -75,31 +70,28 @@ fn main() -> Result<()> {
     for (trigram, docs) in combined.iter() {
         doc_ids.clear();
         doc_lens.clear();
-        unique_successor_ids.clear();
+        unique_successors.clear();
         unique_sorted_successor_ids.clear();
         successor_ids.clear();
 
         for (id, successors) in docs {
             doc_ids.push(*id);
             doc_lens.push(successors.len() as u32);
-            unique_successor_ids.extend(successors);
+            unique_successors.extend(successors);
         }
 
         // Convert unique successor trigrams into trigram IDs.
-        unique_sorted_successor_ids.extend(
-            unique_successor_ids
-                .iter()
-                .map(|t| trigram_ids.get(t).unwrap()),
-        );
+        unique_sorted_successor_ids.extend(unique_successors.iter().copied().map(trigram_as_int));
         unique_sorted_successor_ids.sort();
 
         for (_, successors) in docs {
             let last_successor_id = successor_ids.last().copied().unwrap_or(0);
             successor_ids.extend(
                 successors
-                    .iter()
-                    .map(|s| trigram_ids.get(s).unwrap())
-                    .map(|id| unique_sorted_successor_ids.binary_search(id).unwrap() as u32)
+                    .into_iter()
+                    .copied()
+                    .map(trigram_as_int)
+                    .map(|id| unique_sorted_successor_ids.binary_search(&id).unwrap() as u32)
                     .map(|local_id| local_id + last_successor_id),
             );
             let l = successor_ids.len();
@@ -180,8 +172,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn file_trigrams(content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
+fn file_trigrams(padded_content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
+    assert!(padded_content.iter().rev().take(3).all(|&c| c == 0xFF));
+
     let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
+
     let mut add_trigrams = |t1: Trigram, t2: Trigram| {
         match res.get_mut(&t1) {
             Some(s) => {
@@ -195,27 +190,15 @@ fn file_trigrams(content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
         };
     };
 
-    for hexgram in content.array_windows::<6>() {
+    for hexgram in padded_content.array_windows::<6>() {
         let (t1, t2) = hexgram.split_array_ref::<3>();
         let t2 = unsafe { &*(t2.as_ptr() as *const [u8; 3]) };
         add_trigrams(*t1, *t2);
     }
 
-    drop(add_trigrams);
-    match content {
-        [.., a, b, _, _, _] => {
-            res.insert([*a, *b, 0xFF], FnvHashSet::default());
-            res.insert([*b, 0xFF, 0xFF], FnvHashSet::default());
-            res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
-        }
-        [.., b, _, _, _] => {
-            res.insert([*b, 0xFF, 0xFF], FnvHashSet::default());
-            res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
-        }
-        [..] => {
-            res.insert([0xFF, 0xFF, 0xFF], FnvHashSet::default());
-        }
-    }
-
     res
+}
+
+fn trigram_as_int(t: Trigram) -> u32 {
+    (t[0] as u32) << 16 + (t[1] as u32) << 8 + t[2] as u32
 }
