@@ -52,19 +52,10 @@ fn main() -> Result<()> {
 
     let buf = &mut BufWriter::new(std::io::stdout().lock());
     let mut doc_ids = Vec::new();
-    let mut doc_ids_len_h = Histogram::new();
-    let mut doc_ids_bytes_h = Histogram::new();
     let mut doc_lens = Vec::new();
-    let mut doc_lens_len_h = Histogram::new();
-    let mut doc_lens_bytes_h = Histogram::new();
     let mut unique_successors: FnvHashSet<Trigram> = FnvHashSet::default();
     let mut unique_sorted_successor_ids: Vec<u32> = Vec::new();
-    let mut unique_len_h = Histogram::new();
-    let mut unique_bytes_h = Histogram::new();
     let mut successor_ids: Vec<u32> = Vec::new();
-    let mut successor_len_h = Histogram::new();
-    let mut successor_bytes_h = Histogram::new();
-    let mut trigram_h = Histogram::new();
     let mut total_index_size = 0;
 
     for (trigram, docs) in combined.iter() {
@@ -101,33 +92,16 @@ fn main() -> Result<()> {
         let sink = &mut std::io::sink();
 
         let doc_bytes = U32DeltaCompressor(&doc_ids).write_to(sink)?;
-        doc_ids_len_h.increment(doc_ids.len() as u64).unwrap();
-        doc_ids_bytes_h.increment(doc_bytes as u64).unwrap();
 
         let doc_len_bytes = U32Compressor(&doc_lens).write_to(sink)?;
-        doc_lens_len_h.increment(doc_lens.len() as u64).unwrap();
-        doc_lens_bytes_h.increment(doc_len_bytes as u64).unwrap();
 
         let unique_successor_id_bytes =
             U32DeltaCompressor(&unique_sorted_successor_ids).write_to(sink)?;
-        unique_len_h
-            .increment(unique_sorted_successor_ids.len() as u64)
-            .unwrap();
-        unique_bytes_h
-            .increment(unique_successor_id_bytes as u64)
-            .unwrap();
 
         let successor_id_bytes = U32DeltaCompressor(&successor_ids).write_to(sink)?;
-        successor_len_h
-            .increment(successor_ids.len() as u64)
-            .unwrap();
-        successor_bytes_h
-            .increment(successor_id_bytes as u64)
-            .unwrap();
 
         let trigram_size =
             doc_bytes + doc_len_bytes + unique_successor_id_bytes + successor_id_bytes;
-        trigram_h.increment(trigram_size as u64).unwrap();
 
         total_index_size += trigram_size;
     }
@@ -141,33 +115,6 @@ fn main() -> Result<()> {
     )?;
 
     write!(buf, "Unique trigrams: {}\n", combined.len())?;
-
-    for (name, histogram) in &[
-        ("Doc ID len:", &doc_ids_len_h),
-        ("Doc ID bytes:", &doc_ids_bytes_h),
-        ("Doc Lens len:", &doc_lens_len_h),
-        ("Doc Lens bytes:", &doc_lens_bytes_h),
-        ("Unique successors len:", &unique_len_h),
-        ("Unique successors bytes:", &unique_bytes_h),
-        ("Successors len:", &successor_len_h),
-        ("Successors bytes", &successor_bytes_h),
-        ("Trigrams sizes", &trigram_h),
-    ] {
-        write!(
-            buf,
-            "{:25}{:3} {:3} {:3} {:3} {:9} -- {}\n",
-            name,
-            histogram.minimum().unwrap(),
-            histogram.percentile(10.).unwrap(),
-            histogram.mean().unwrap(),
-            histogram.percentile(90.).unwrap(),
-            histogram.maximum().unwrap(),
-            histogram
-                .into_iter()
-                .map(|b| b.value() * b.count())
-                .sum::<u64>(),
-        )?;
-    }
 
     Ok(())
 }
