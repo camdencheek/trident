@@ -6,7 +6,6 @@ use std::io::{BufWriter, Read, Write};
 
 use anyhow::Result;
 use fnv::{FnvHashMap, FnvHashSet};
-use histogram::Histogram;
 use serialize::{StreamWriter, U32Compressor, U32DeltaCompressor};
 use walkdir::WalkDir;
 

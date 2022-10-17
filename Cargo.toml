@@ -12,6 +12,8 @@ fnv = "1.0.7"
 hashers = "1.0.1"
 histogram = "0.6.9"
 integer-encoding = "3.0.4"
+quickcheck = "1.0.3"
+rand = "0.8.5"
 walkdir = "2.3.2"
 
 [profile.release]
