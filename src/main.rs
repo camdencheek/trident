@@ -51,6 +51,7 @@ fn main() -> Result<()> {
         }
     }
 
+    let sink = &mut std::io::sink();
     let mut output_file = FileCursor::new(File::create("/tmp/output.trgm")?);
     let mut doc_ids = Vec::new();
     let mut doc_lens = Vec::new();
@@ -75,9 +76,11 @@ fn main() -> Result<()> {
         // Convert unique successor trigrams into trigram IDs.
         unique_successor_ids.extend(unique_successors.iter().copied().map(trigram_as_int));
         unique_successor_ids.sort();
+        let unique_successor_id_bytes = U32DeltaCompressor(&unique_successor_ids).write_to(sink)?;
 
         for (_, successors) in docs {
             let last_successor_id = successor_ids.last().copied().unwrap_or(0);
+
             successor_ids.extend(
                 successors
                     .into_iter()
@@ -90,11 +93,8 @@ fn main() -> Result<()> {
             successor_ids[l - successors.len()..].sort()
         }
 
-        let sink = &mut std::io::sink();
-
         let doc_bytes = U32DeltaCompressor(&doc_ids).write_to(sink)?;
         let doc_len_bytes = U32Compressor(&doc_lens).write_to(sink)?;
-        let unique_successor_id_bytes = U32DeltaCompressor(&unique_successor_ids).write_to(sink)?;
         let successor_id_bytes = U32DeltaCompressor(&successor_ids).write_to(sink)?;
 
         let trigram_size =
@@ -110,7 +110,7 @@ fn main() -> Result<()> {
         total_index_size as f64 / total_content_size as f64
     );
 
-    Ok(())
+    std::process::exit(0);
 }
 
 fn extract_trigrams(padded_content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
