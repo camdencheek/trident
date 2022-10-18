@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 
 use anyhow::Result;
+use file_cursor::FileCursor;
 use fnv::{FnvHashMap, FnvHashSet};
 use serialize::{StreamWriter, U32Compressor, U32DeltaCompressor};
 use walkdir::WalkDir;
@@ -50,7 +51,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let buf = &mut BufWriter::new(std::io::stdout().lock());
+    let mut output_file = FileCursor::new(File::create("/tmp/output.trgm")?);
     let mut doc_ids = Vec::new();
     let mut doc_lens = Vec::new();
     let mut unique_successors: FnvHashSet<Trigram> = FnvHashSet::default();
@@ -102,15 +103,12 @@ fn main() -> Result<()> {
         total_index_size += trigram_size;
     }
 
-    write!(
-        buf,
+    println!(
         "Content size: {}, Compressed size: {}, Compression ratio: {:.3}\n",
         total_content_size,
         total_index_size,
         total_index_size as f64 / total_content_size as f64
-    )?;
-
-    write!(buf, "Unique trigrams: {}\n", combined.len())?;
+    );
 
     Ok(())
 }

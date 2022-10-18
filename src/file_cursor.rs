@@ -7,6 +7,12 @@ pub struct FileCursor {
     offset: u64,
 }
 
+impl FileCursor {
+    pub fn new(f: File) -> Self {
+        Self { f, offset: 0 }
+    }
+}
+
 impl Read for FileCursor {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.f.read_at(buf, self.offset)?;
