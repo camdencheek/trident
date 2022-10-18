@@ -2,9 +2,10 @@
 #![feature(split_array)]
 
 use std::fs::File;
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 
 use anyhow::Result;
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use file_cursor::FileCursor;
 use fnv::{FnvHashMap, FnvHashSet};
 use serialize::{StreamWriter, U32Compressor, U32DeltaCompressor};
@@ -51,14 +52,17 @@ fn main() -> Result<()> {
         }
     }
 
-    let sink = &mut std::io::sink();
-    let mut output_file = FileCursor::new(File::create("/tmp/output.trgm")?);
+    let mut output_file = BufWriter::new(File::create("/tmp/output.trgm")?);
+
     let mut doc_ids = Vec::new();
     let mut doc_lens = Vec::new();
     let mut unique_successors: FnvHashSet<Trigram> = FnvHashSet::default();
     let mut unique_successor_ids: Vec<u32> = Vec::new();
     let mut successor_ids: Vec<u32> = Vec::new();
     let mut total_index_size = 0;
+    let mut buf = contents;
+
+    let mut offsets: Vec<(Trigram, u32)> = Vec::new();
 
     for (trigram, docs) in combined.iter() {
         doc_ids.clear();
@@ -66,6 +70,7 @@ fn main() -> Result<()> {
         unique_successors.clear();
         unique_successor_ids.clear();
         successor_ids.clear();
+        buf.clear();
 
         for (id, successors) in docs {
             doc_ids.push(*id);
@@ -76,7 +81,6 @@ fn main() -> Result<()> {
         // Convert unique successor trigrams into trigram IDs.
         unique_successor_ids.extend(unique_successors.iter().copied().map(trigram_as_int));
         unique_successor_ids.sort();
-        let unique_successor_id_bytes = U32DeltaCompressor(&unique_successor_ids).write_to(sink)?;
 
         for (_, successors) in docs {
             let last_successor_id = successor_ids.last().copied().unwrap_or(0);
@@ -93,24 +97,58 @@ fn main() -> Result<()> {
             successor_ids[l - successors.len()..].sort()
         }
 
-        let doc_bytes = U32DeltaCompressor(&doc_ids).write_to(sink)?;
-        let doc_len_bytes = U32Compressor(&doc_lens).write_to(sink)?;
-        let successor_id_bytes = U32DeltaCompressor(&successor_ids).write_to(sink)?;
+        let unique_successor_id_bytes =
+            U32DeltaCompressor(&unique_successor_ids).write_to(&mut buf)?;
+        let doc_len_bytes = U32Compressor(&doc_lens).write_to(&mut buf)?;
+        let successor_id_bytes = U32DeltaCompressor(&successor_ids).write_to(&mut buf)?;
+        let doc_bytes = U32DeltaCompressor(&doc_ids).write_to(&mut buf)?;
 
-        let trigram_size =
-            doc_bytes + doc_len_bytes + unique_successor_id_bytes + successor_id_bytes;
+        let header = PostingHeader {
+            unique_successors_len: unique_successor_id_bytes as u32,
+            doc_lens_len: doc_len_bytes as u32,
+            successors_len: successor_id_bytes as u32,
+            doc_ids_len: doc_bytes as u32,
+        };
 
-        total_index_size += trigram_size;
+        offsets.push((*trigram, output_file.seek(SeekFrom::Current(0))? as u32));
+        header.write_to(&mut output_file)?;
+        output_file.write_all(&buf)?;
     }
+
+    for (trigram, offset) in &offsets {
+        output_file.write_all(trigram)?;
+        output_file.write_u32::<LittleEndian>(*offset)?;
+    }
+    output_file.write_u32::<LittleEndian>(offsets.len() as u32 * 7)?;
+
+    let index_size = output_file.seek(SeekFrom::Current(0))?;
 
     println!(
         "Content size: {}, Compressed size: {}, Compression ratio: {:.3}\n",
         total_content_size,
-        total_index_size,
-        total_index_size as f64 / total_content_size as f64
+        index_size,
+        index_size as f64 / total_content_size as f64
     );
 
     std::process::exit(0);
+}
+
+#[derive(Clone, Default)]
+struct PostingHeader {
+    unique_successors_len: u32,
+    doc_lens_len: u32,
+    successors_len: u32,
+    doc_ids_len: u32,
+}
+
+impl StreamWriter for PostingHeader {
+    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+        w.write_u32::<LittleEndian>(self.unique_successors_len)?;
+        w.write_u32::<LittleEndian>(self.doc_lens_len)?;
+        w.write_u32::<LittleEndian>(self.successors_len)?;
+        w.write_u32::<LittleEndian>(self.doc_ids_len)?;
+        Ok(4 * std::mem::size_of::<u32>())
+    }
 }
 
 fn extract_trigrams(padded_content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
