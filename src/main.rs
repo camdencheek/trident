@@ -9,6 +9,7 @@ use fnv::{FnvHashMap, FnvHashSet};
 use serialize::{StreamWriter, U32Compressor, U32DeltaCompressor};
 use walkdir::WalkDir;
 
+mod file_cursor;
 mod serialize;
 
 type Trigram = [u8; 3];
@@ -39,7 +40,7 @@ fn main() -> Result<()> {
         contents.make_ascii_lowercase();
         contents.extend_from_slice(&[0xFF, 0xFF, 0xFF]);
         total_content_size += contents.len();
-        for (trigram, set) in file_trigrams(&contents) {
+        for (trigram, set) in extract_trigrams(&contents) {
             match combined.get_mut(&trigram) {
                 Some(v) => v.push((id as u32, set)),
                 None => {
@@ -53,7 +54,7 @@ fn main() -> Result<()> {
     let mut doc_ids = Vec::new();
     let mut doc_lens = Vec::new();
     let mut unique_successors: FnvHashSet<Trigram> = FnvHashSet::default();
-    let mut unique_sorted_successor_ids: Vec<u32> = Vec::new();
+    let mut unique_successor_ids: Vec<u32> = Vec::new();
     let mut successor_ids: Vec<u32> = Vec::new();
     let mut total_index_size = 0;
 
@@ -61,7 +62,7 @@ fn main() -> Result<()> {
         doc_ids.clear();
         doc_lens.clear();
         unique_successors.clear();
-        unique_sorted_successor_ids.clear();
+        unique_successor_ids.clear();
         successor_ids.clear();
 
         for (id, successors) in docs {
@@ -71,8 +72,8 @@ fn main() -> Result<()> {
         }
 
         // Convert unique successor trigrams into trigram IDs.
-        unique_sorted_successor_ids.extend(unique_successors.iter().copied().map(trigram_as_int));
-        unique_sorted_successor_ids.sort();
+        unique_successor_ids.extend(unique_successors.iter().copied().map(trigram_as_int));
+        unique_successor_ids.sort();
 
         for (_, successors) in docs {
             let last_successor_id = successor_ids.last().copied().unwrap_or(0);
@@ -81,7 +82,7 @@ fn main() -> Result<()> {
                     .into_iter()
                     .copied()
                     .map(trigram_as_int)
-                    .map(|id| unique_sorted_successor_ids.binary_search(&id).unwrap() as u32)
+                    .map(|id| unique_successor_ids.binary_search(&id).unwrap() as u32)
                     .map(|local_id| local_id + last_successor_id),
             );
             let l = successor_ids.len();
@@ -91,12 +92,8 @@ fn main() -> Result<()> {
         let sink = &mut std::io::sink();
 
         let doc_bytes = U32DeltaCompressor(&doc_ids).write_to(sink)?;
-
         let doc_len_bytes = U32Compressor(&doc_lens).write_to(sink)?;
-
-        let unique_successor_id_bytes =
-            U32DeltaCompressor(&unique_sorted_successor_ids).write_to(sink)?;
-
+        let unique_successor_id_bytes = U32DeltaCompressor(&unique_successor_ids).write_to(sink)?;
         let successor_id_bytes = U32DeltaCompressor(&successor_ids).write_to(sink)?;
 
         let trigram_size =
@@ -118,7 +115,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn file_trigrams(padded_content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
+fn extract_trigrams(padded_content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
     assert!(padded_content.iter().rev().take(3).all(|&c| c == 0xFF));
 
     let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
@@ -136,10 +133,10 @@ fn file_trigrams(padded_content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigra
         };
     };
 
-    for hexgram in padded_content.array_windows::<6>() {
-        let (t1, t2) = hexgram.split_array_ref::<3>();
-        let t2 = unsafe { &*(t2.as_ptr() as *const [u8; 3]) };
-        add_trigrams(*t1, *t2);
+    let trigrams = padded_content.array_windows::<3>().copied();
+    let successors = trigrams.clone().skip(3);
+    for (trigram, successor) in trigrams.zip(successors) {
+        add_trigrams(trigram, successor);
     }
 
     res
