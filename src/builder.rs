@@ -38,34 +38,35 @@ impl IndexBuilder {
     }
 
     fn extract_trigrams(content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
-        let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
+        let trigrams = content.array_windows::<3>().copied();
+        let successors = trigrams.clone().skip(3).chain(
+            // The last three trigrams will not have complete successors, so augment
+            // the successors iterator with partial trigrams padded with the 0xFF byte,
+            // which will not occur in any UTF-8 text. For text that is not encoded as
+            // UTF-8, this may provide some false positives when searching for patterns
+            // that contain 0xFF in the successor trigram.
+            (0..3).rev().filter_map(|i| {
+                let mut buf = [0xFFu8; 3];
+                for (i, b) in content.get(content.len() - i..)?.iter().enumerate() {
+                    buf[i] = *b;
+                }
+                Some(buf)
+            }),
+        );
 
-        let mut add_trigrams = |t1: Trigram, t2: Trigram| {
-            match res.get_mut(&t1) {
+        let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
+        for (trigram, successor) in trigrams.zip(successors) {
+            match res.get_mut(&trigram) {
                 Some(s) => {
-                    s.insert(t2);
+                    s.insert(successor);
                 }
                 None => {
-                    let mut s = FnvHashSet::default();
-                    s.insert(t2);
-                    res.insert(t1, s);
+                    let mut set = FnvHashSet::default();
+                    set.insert(successor);
+                    res.insert(trigram, set);
                 }
             };
-        };
-
-        let trigrams = content.array_windows::<3>().copied();
-        let padded_successors = (0..3).rev().filter_map(|i| {
-            let mut buf = [0xFFu8; 3];
-            for (i, b) in content.get(content.len() - i..)?.iter().enumerate() {
-                buf[i] = *b;
-            }
-            Some(buf)
-        });
-        let successors = trigrams.clone().skip(3).chain(padded_successors);
-        for (trigram, successor) in trigrams.zip(successors) {
-            add_trigrams(trigram, successor);
         }
-
         res
     }
 
