@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = "1.0.65"
 bitpacking = "0.8.4"
 byteorder = "1.4.3"
+clap = { version = "4.0.17", features = ["derive"]}
 fnv = "1.0.7"
 hashers = "1.0.1"
 histogram = "0.6.9"
