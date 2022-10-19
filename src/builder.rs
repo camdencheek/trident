@@ -28,17 +28,8 @@ impl IndexBuilder {
         }
     }
 
-    pub fn add_doc<R: Read>(&mut self, r: &mut R) -> Result<()> {
-        self.buf.clear();
-        r.read_to_end(&mut self.buf)?;
-
-        // Ensure content is UTF8-encoded
-        // TODO input an immutable &str. This decouples the UTF8 checking from this implementation.
-        // This will require not mutating the string.
-        std::str::from_utf8(&self.buf)?;
-        self.buf.make_ascii_lowercase();
-
-        for (trigram, set) in Self::extract_trigrams(&mut self.buf) {
+    pub fn add_doc(&mut self, content: &[u8]) -> Result<()> {
+        for (trigram, set) in Self::extract_trigrams(content) {
             match self.combined.get_mut(&trigram) {
                 Some(v) => v.push((self.doc_ids.next().unwrap(), set)),
                 None => {
@@ -51,7 +42,7 @@ impl IndexBuilder {
         Ok(())
     }
 
-    fn extract_trigrams(content: &mut Vec<u8>) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
+    fn extract_trigrams(content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
         let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
 
         let mut add_trigrams = |t1: Trigram, t2: Trigram| {
@@ -67,9 +58,15 @@ impl IndexBuilder {
             };
         };
 
-        content.extend_from_slice(&[0xFF, 0xFF, 0xFF]);
         let trigrams = content.array_windows::<3>().copied();
-        let successors = trigrams.clone().skip(3);
+        let padded_successors = (0..3).rev().filter_map(|i| {
+            let mut buf = [0xFFu8; 3];
+            for (i, b) in content.get(content.len() - i..)?.iter().enumerate() {
+                buf[i] = *b;
+            }
+            Some(buf)
+        });
+        let successors = trigrams.clone().skip(3).chain(padded_successors);
         for (trigram, successor) in trigrams.zip(successors) {
             add_trigrams(trigram, successor);
         }

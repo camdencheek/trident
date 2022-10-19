@@ -1,4 +1,5 @@
-use std::{fs::File, io::BufWriter, path::PathBuf};
+use std::io::{BufWriter, Read};
+use std::{fs::File, path::PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -58,9 +59,14 @@ fn index(args: IndexArgs) -> Result<()> {
         .filter(|d| d.file_type().is_file());
 
     let mut builder = IndexBuilder::new();
+    let mut buf = String::new();
     for doc in docs {
+        buf.clear();
         let mut f = File::open(doc.path())?;
-        builder.add_doc(&mut f)?;
+        if let Err(e) = f.read_to_string(&mut buf) {
+            println!("skipping {:?}: {}", doc.path(), e);
+        };
+        builder.add_doc(buf.as_bytes())?;
     }
 
     match args.output_file {
