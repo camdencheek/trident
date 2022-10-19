@@ -1,12 +1,9 @@
-use std::{
-    io::{Read, Write},
-    ops::RangeFrom,
-};
+use std::io::Write;
+use std::ops::RangeFrom;
 
 use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use fnv::{FnvHashMap, FnvHashSet};
-use walkdir::WalkDir;
 
 use crate::{
     serialize::{StreamWriter, U32Compressor, U32DeltaCompressor},
@@ -15,7 +12,6 @@ use crate::{
 
 pub struct IndexBuilder {
     doc_ids: RangeFrom<u32>,
-    buf: Vec<u8>,
     combined: FnvHashMap<Trigram, Vec<(u32, FnvHashSet<Trigram>)>>,
 }
 
@@ -23,7 +19,6 @@ impl IndexBuilder {
     pub fn new() -> Self {
         Self {
             doc_ids: 0..,
-            buf: Vec::new(),
             combined: FnvHashMap::default(),
         }
     }
@@ -75,7 +70,7 @@ impl IndexBuilder {
     }
 
     pub fn build<W: Write>(self, w: &mut W) -> Result<()> {
-        let mut buf = self.buf;
+        let mut buf = Vec::new();
         let mut doc_ids = Vec::new();
         let mut doc_lens = Vec::new();
         let mut unique_successors: FnvHashSet<Trigram> = FnvHashSet::default();
