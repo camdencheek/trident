@@ -1,9 +1,10 @@
-use std::io::{BufWriter, Read};
+use std::io::{BufWriter, Read, Write};
 use std::{fs::File, path::PathBuf};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use trident::index::stats::IndexStats;
 use trident::index::IndexBuilder;
 use walkdir::WalkDir;
 
@@ -69,18 +70,57 @@ fn index(args: IndexArgs) -> Result<()> {
         builder.add_doc(buf.as_bytes())?;
     }
 
-    match args.output_file {
+    let stats = match args.output_file {
         Some(path) => {
             let mut f = BufWriter::new(File::create(path)?);
-            builder.build(&mut f)?;
+            builder.build(&mut f)?
         }
         None => {
             let mut stdout = std::io::stdout().lock();
-            builder.build(&mut stdout)?;
+            builder.build(&mut stdout)?
         }
-    }
-
+    };
+    summarize_stats(stats);
     Ok(())
+}
+
+fn summarize_stats(stats: IndexStats) {
+    let index_size = stats.build.total_size_bytes();
+    let content_size = stats.extract.doc_bytes;
+    let mbps = stats.extract.doc_bytes as f64 / 1024. / 1024. / stats.total_time.as_secs_f64();
+    println!(
+        "\nIndexed {} in {:.1}s at {:.2} MB/s",
+        bytefmt::format(content_size as u64),
+        stats.total_time.as_secs_f64(),
+        mbps
+    );
+
+    let ratio = index_size as f64 / content_size as f64;
+    println!(
+        "Index Size: {}, Compression ratio: {:.3}",
+        bytefmt::format(index_size as u64),
+        ratio
+    );
+    println!("Breakdown:");
+
+    let header_ratio = stats.build.postings_sum.header_bytes as f64 / index_size as f64;
+    println!("\tHeaders: {:.3}", header_ratio);
+
+    let unique_successors_ratio =
+        stats.build.postings_sum.unique_successors.bytes as f64 / index_size as f64;
+    println!("\tUnique successors: {:.3}", unique_successors_ratio);
+
+    let run_lengths_ratio = stats.build.postings_sum.run_lengths.bytes as f64 / index_size as f64;
+    println!("\tRun lengths: {:.3}", run_lengths_ratio);
+
+    let successors_ratio = stats.build.postings_sum.successors.bytes as f64 / index_size as f64;
+    println!("\tSuccessors: {:.3}", successors_ratio);
+
+    let unique_docs_ratio = stats.build.postings_sum.unique_docs.bytes as f64 / index_size as f64;
+    println!("\tUnique Docs: {:.3}", unique_docs_ratio);
+
+    let posting_offsets_ratio = stats.build.posting_offsets_bytes as f64 / index_size as f64;
+    println!("\tPosting Offsets: {:.3}", posting_offsets_ratio);
 }
 
 fn search(args: SearchArgs) -> Result<()> {

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.65"
 bitpacking = "0.8.4"
+bytefmt = "0.1.7"
 byteorder = "1.4.3"
 clap = { version = "4.0.17", features = ["derive"]}
 integer-encoding = "3.0.4"
