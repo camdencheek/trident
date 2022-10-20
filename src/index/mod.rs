@@ -55,12 +55,12 @@ impl IndexBuilder {
     pub fn add_doc(&mut self, content: &[u8]) -> Result<()> {
         let start = Instant::now();
 
+        let doc_id = self.doc_ids.next().unwrap();
         for (trigram, set) in Self::extract_trigrams(content) {
             match self.combined.get_mut(&trigram) {
-                Some(v) => v.push((self.doc_ids.next().unwrap(), set)),
+                Some(v) => v.push((doc_id, set)),
                 None => {
-                    self.combined
-                        .insert(trigram, vec![(self.doc_ids.next().unwrap(), set)]);
+                    self.combined.insert(trigram, vec![(doc_id, set)]);
                 }
             }
         }
@@ -179,7 +179,6 @@ impl IndexBuilder {
             self.buf_u32[l - successors.len()..].sort();
         }
 
-        assert!(self.buf_u32.is_sorted());
         let compressed_size = U32DeltaCompressor(&self.buf_u32).write_to(w)?;
 
         Ok(SequenceStats {
@@ -196,7 +195,6 @@ impl IndexBuilder {
         self.buf_u32.clear();
         self.buf_u32.extend(docs.iter().map(|(id, _)| id));
 
-        assert!(self.buf_u32.is_sorted());
         let compressed_size = U32DeltaCompressor(&self.buf_u32).write_to(w)?;
 
         Ok(SequenceStats {

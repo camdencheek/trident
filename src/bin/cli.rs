@@ -101,7 +101,7 @@ fn summarize_stats(stats: IndexStats) {
         bytefmt::format(index_size as u64),
         ratio
     );
-    println!("Breakdown:");
+    println!("Index Size Breakdown:");
 
     let header_ratio = stats.build.postings_sum.header_bytes as f64 / index_size as f64;
     println!("\tHeaders: {:.3}", header_ratio);
@@ -121,6 +121,9 @@ fn summarize_stats(stats: IndexStats) {
 
     let posting_offsets_ratio = stats.build.posting_offsets_bytes as f64 / index_size as f64;
     println!("\tPosting Offsets: {:.3}", posting_offsets_ratio);
+
+    println!("Doc count: {}", stats.extract.num_docs);
+    println!("Unique trigram count: {}", stats.extract.unique_trigrams);
 }
 
 fn search(args: SearchArgs) -> Result<()> {
