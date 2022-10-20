@@ -1,5 +1,5 @@
-use std::io::Write;
 use std::ops::RangeFrom;
+use std::{io::Write, time::Duration};
 
 use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
@@ -154,6 +154,7 @@ impl IndexBuilder {
     }
 }
 
+// Stats collected about the indexing process
 struct IndexStats {
     // The number of documents indexed
     num_docs: usize,
@@ -172,6 +173,12 @@ struct IndexStats {
 
     // The aggregated sum of all trigram posting stats
     postings_sum: TrigramPostingStats,
+
+    // The total size of the index on disk
+    total_index_size_bytes: usize,
+
+    // The total time it took to build the index
+    index_time: Duration,
 }
 
 impl IndexStats {
@@ -182,6 +189,7 @@ impl IndexStats {
     }
 }
 
+// Stats for a single trigram posting list
 struct TrigramPostingStats {
     // Stats for the unique successors
     unique_successors: SequenceStats,
@@ -225,6 +233,7 @@ impl TrigramPostingStats {
     }
 }
 
+// Stats about the serialization of an integer sequence
 struct SequenceStats {
     // The length of the sequence
     len: usize,
