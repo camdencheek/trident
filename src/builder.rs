@@ -38,34 +38,42 @@ impl IndexBuilder {
     }
 
     fn extract_trigrams(content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
-        let trigrams = content.array_windows::<3>().copied();
-        let successors = trigrams.clone().skip(3).chain(
-            // The last three trigrams will not have complete successors, so augment
-            // the successors iterator with partial trigrams padded with the 0xFF byte,
-            // which will not occur in any UTF-8 text. For text that is not encoded as
-            // UTF-8, this may provide some false positives when searching for patterns
-            // that contain 0xFF in the successor trigram.
-            (0..3).rev().filter_map(|i| {
-                let mut buf = [0xFFu8; 3];
-                for (i, b) in content.get(content.len() - i..)?.iter().enumerate() {
-                    buf[i] = *b;
-                }
-                Some(buf)
-            }),
-        );
-
         let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
+
+        let mut buf = [0u8; 4];
+        let partial_trigrams = {
+            let bytes = match content {
+                [.., y, z] => {
+                    buf = [*y, *z, 0xFF, 0xFF];
+                    &buf[..4]
+                }
+                [z] => {
+                    buf = [*z, 0xFF, 0xFF, 0xFF];
+                    &buf[..3]
+                }
+                _ => &buf[..0],
+            };
+            bytes.array_windows::<3>().copied()
+        };
+
+        let trigrams = content.array_windows::<3>().copied();
+        let successors = trigrams.clone().skip(3).chain(partial_trigrams.clone());
+
         for (trigram, successor) in trigrams.zip(successors) {
             match res.get_mut(&trigram) {
                 Some(s) => {
                     s.insert(successor);
                 }
                 None => {
-                    let mut set = FnvHashSet::default();
-                    set.insert(successor);
-                    res.insert(trigram, set);
+                    res.insert(trigram, FnvHashSet::from_iter([successor].into_iter()));
                 }
             };
+        }
+
+        for partial in partial_trigrams {
+            if !res.contains_key(&partial) {
+                res.insert(partial, FnvHashSet::default());
+            }
         }
         res
     }
