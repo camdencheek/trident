@@ -192,6 +192,7 @@ impl<R: Read> U32DeltaDecompressor<R> {
 mod test {
     use super::*;
     use quickcheck::quickcheck;
+    use std::io::Cursor;
 
     quickcheck! {
         fn compress_roundtrip(input: Vec<u32>) -> bool {

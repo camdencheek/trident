@@ -154,6 +154,108 @@ impl IndexBuilder {
     }
 }
 
+struct IndexStats {
+    // The number of documents indexed
+    num_docs: usize,
+
+    // The total size of documents indexed
+    doc_bytes: usize,
+
+    // The number of unique trigrams in the indexed documents
+    unique_trigrams: usize,
+
+    // The aggregated minimums for all trigram posting stats
+    postings_min: TrigramPostingStats,
+
+    // The aggregated maximums for all trigram posting stats
+    postings_max: TrigramPostingStats,
+
+    // The aggregated sum of all trigram posting stats
+    postings_sum: TrigramPostingStats,
+}
+
+impl IndexStats {
+    fn add_posting(&mut self, posting: TrigramPostingStats) {
+        self.postings_min = self.postings_min.min(&posting);
+        self.postings_max = self.postings_max.max(&posting);
+        self.postings_sum = self.postings_max.sum(&posting);
+    }
+}
+
+struct TrigramPostingStats {
+    // Stats for the unique successors
+    unique_successors: SequenceStats,
+
+    // Stats for the unique doc IDs
+    unique_docs: SequenceStats,
+
+    // Stats for the equal-doc run lengths in successors
+    run_lengths: SequenceStats,
+
+    // Stats for the successors list
+    successors: SequenceStats,
+}
+
+impl TrigramPostingStats {
+    fn max(&self, other: &TrigramPostingStats) -> TrigramPostingStats {
+        Self {
+            unique_successors: self.unique_successors.max(&other.unique_successors),
+            unique_docs: self.unique_docs.max(&other.unique_docs),
+            run_lengths: self.run_lengths.max(&other.run_lengths),
+            successors: self.successors.max(&other.successors),
+        }
+    }
+
+    fn min(&self, other: &TrigramPostingStats) -> TrigramPostingStats {
+        Self {
+            unique_successors: self.unique_successors.min(&other.unique_successors),
+            unique_docs: self.unique_docs.min(&other.unique_docs),
+            run_lengths: self.run_lengths.min(&other.run_lengths),
+            successors: self.successors.min(&other.successors),
+        }
+    }
+
+    fn sum(&self, other: &TrigramPostingStats) -> TrigramPostingStats {
+        Self {
+            unique_successors: self.unique_successors.sum(&other.unique_successors),
+            unique_docs: self.unique_docs.sum(&other.unique_docs),
+            run_lengths: self.run_lengths.sum(&other.run_lengths),
+            successors: self.successors.sum(&other.successors),
+        }
+    }
+}
+
+struct SequenceStats {
+    // The length of the sequence
+    len: usize,
+
+    // The size of the compressed sequence in bytes
+    bytes: usize,
+}
+
+impl SequenceStats {
+    fn max(&self, other: &SequenceStats) -> SequenceStats {
+        Self {
+            len: self.len.max(other.len),
+            bytes: self.bytes.max(other.bytes),
+        }
+    }
+
+    fn min(&self, other: &SequenceStats) -> SequenceStats {
+        Self {
+            len: self.len.min(other.len),
+            bytes: self.bytes.min(other.bytes),
+        }
+    }
+
+    fn sum(&self, other: &SequenceStats) -> SequenceStats {
+        Self {
+            len: self.len + other.len,
+            bytes: self.bytes + other.bytes,
+        }
+    }
+}
+
 fn trigram_as_int(t: Trigram) -> u32 {
     (t[0] as u32) << 16 + (t[1] as u32) << 8 + t[2] as u32
 }

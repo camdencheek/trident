@@ -11,11 +11,12 @@ bitpacking = "0.8.4"
 byteorder = "1.4.3"
 clap = { version = "4.0.17", features = ["derive"]}
 integer-encoding = "3.0.4"
-quickcheck = "1.0.3"
 rand = "0.8.5"
-roaring = "0.10.1"
 rustc-hash = "1.1.0"
 walkdir = "2.3.2"
+
+[dev-dependencies]
+quickcheck = "1.0.3"
 
 [profile.release]
 debug = true
