@@ -3,7 +3,7 @@ use std::ops::RangeFrom;
 
 use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
-use fnv::{FnvHashMap, FnvHashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     serialize::{StreamWriter, U32Compressor, U32DeltaCompressor},
@@ -12,14 +12,14 @@ use crate::{
 
 pub struct IndexBuilder {
     doc_ids: RangeFrom<u32>,
-    combined: FnvHashMap<Trigram, Vec<(u32, FnvHashSet<Trigram>)>>,
+    combined: FxHashMap<Trigram, Vec<(u32, FxHashSet<Trigram>)>>,
 }
 
 impl IndexBuilder {
     pub fn new() -> Self {
         Self {
             doc_ids: 0..,
-            combined: FnvHashMap::default(),
+            combined: FxHashMap::default(),
         }
     }
 
@@ -37,8 +37,8 @@ impl IndexBuilder {
         Ok(())
     }
 
-    fn extract_trigrams(content: &[u8]) -> FnvHashMap<Trigram, FnvHashSet<Trigram>> {
-        let mut res: FnvHashMap<Trigram, FnvHashSet<Trigram>> = FnvHashMap::default();
+    fn extract_trigrams(content: &[u8]) -> FxHashMap<Trigram, FxHashSet<Trigram>> {
+        let mut res: FxHashMap<Trigram, FxHashSet<Trigram>> = FxHashMap::default();
 
         let mut buf = [0u8; 4];
         let partial_trigrams = {
@@ -65,14 +65,14 @@ impl IndexBuilder {
                     s.insert(successor);
                 }
                 None => {
-                    res.insert(trigram, FnvHashSet::from_iter([successor].into_iter()));
+                    res.insert(trigram, FxHashSet::from_iter([successor].into_iter()));
                 }
             };
         }
 
         for partial in partial_trigrams {
             if !res.contains_key(&partial) {
-                res.insert(partial, FnvHashSet::default());
+                res.insert(partial, FxHashSet::default());
             }
         }
         res
@@ -82,7 +82,7 @@ impl IndexBuilder {
         let mut buf = Vec::new();
         let mut doc_ids = Vec::new();
         let mut doc_lens = Vec::new();
-        let mut unique_successors: FnvHashSet<Trigram> = FnvHashSet::default();
+        let mut unique_successors: FxHashSet<Trigram> = FxHashSet::default();
         let mut unique_successor_ids: Vec<u32> = Vec::new();
         let mut successor_ids: Vec<u32> = Vec::new();
         let mut posting_list_ends: Vec<(Trigram, u32)> = Vec::new();
