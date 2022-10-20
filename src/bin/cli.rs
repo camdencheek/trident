@@ -4,7 +4,7 @@ use std::{fs::File, path::PathBuf};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use trident::index::Builder;
+use trident::index::IndexBuilder;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
@@ -58,7 +58,7 @@ fn index(args: IndexArgs) -> Result<()> {
         .filter_map(|d| d.ok())
         .filter(|d| d.file_type().is_file());
 
-    let mut builder = Builder::new();
+    let mut builder = IndexBuilder::new();
     let mut buf = String::new();
     for doc in docs {
         buf.clear();
