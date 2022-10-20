@@ -1,10 +1,9 @@
+use std::io::{Read, Write};
+use std::ops::Range;
+
 use anyhow::Result;
 use bitpacking::{BitPacker, BitPacker4x};
 use integer_encoding::{VarIntReader, VarIntWriter};
-use std::{
-    io::{Cursor, Read, Write},
-    ops::Range,
-};
 
 pub trait StreamWriter {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize>;
