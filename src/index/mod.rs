@@ -126,7 +126,7 @@ impl IndexBuilder {
 
         // Collect the set into a vec of the trigrams' u32 representation and sort
         let mut unique_trigrams =
-            Vec::from_iter(self.buf_trigram_set.iter().copied().map(trigram_as_int));
+            Vec::from_iter(self.buf_trigram_set.iter().copied().map(trigram_to_id));
         unique_trigrams.sort();
 
         let compressed_size = U32DeltaCompressor(&unique_trigrams).write_to(w)?;
@@ -171,7 +171,7 @@ impl IndexBuilder {
                 successors
                     .iter()
                     .copied()
-                    .map(trigram_as_int)
+                    .map(trigram_to_id)
                     .map(|t| unique_trigrams.binary_search(&t).unwrap() as u32)
                     .map(|t| t + last_successor),
             );
@@ -274,8 +274,16 @@ impl IndexBuilder {
     }
 }
 
-fn trigram_as_int(t: Trigram) -> u32 {
-    (t[0] as u32) << 16 + (t[1] as u32) << 8 + t[2] as u32
+fn trigram_to_id(t: Trigram) -> TrigramID {
+    ((t[0] as u32) << 16) + ((t[1] as u32) << 8) + t[2] as u32
+}
+
+fn trigram_from_id(t: TrigramID) -> Trigram {
+    [
+        ((t & 0x00FF0000) >> 16) as u8,
+        ((t & 0x0000FF00) >> 8) as u8,
+        (t & 0x000000FF) as u8,
+    ]
 }
 
 #[derive(Clone, Default)]
@@ -293,5 +301,17 @@ impl StreamWriter for PostingHeader {
         w.write_u32::<LittleEndian>(self.successors_len)?;
         w.write_u32::<LittleEndian>(self.doc_ids_len)?;
         Ok(4 * std::mem::size_of::<u32>())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use quickcheck::quickcheck;
+
+    quickcheck! {
+        fn trigram_id_roundtrip(b1: u8, b2: u8, b3: u8) -> bool {
+            trigram_from_id(trigram_to_id([b1, b2, b3])) == [b1, b2, b3]
+        }
     }
 }
