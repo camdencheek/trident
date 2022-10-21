@@ -2,8 +2,8 @@
 #![feature(is_sorted)]
 #![feature(split_array)]
 
+pub mod build;
 pub mod file_cursor;
-pub mod index;
 pub mod serialize;
 
 type Trigram = [u8; 3];

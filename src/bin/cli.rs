@@ -4,8 +4,8 @@ use std::{fs::File, path::PathBuf};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use trident::index::stats::IndexStats;
-use trident::index::IndexBuilder;
+use trident::build::stats::IndexStats;
+use trident::build::IndexBuilder;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
