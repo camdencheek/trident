@@ -3,8 +3,8 @@
 #![feature(split_array)]
 
 pub mod build;
-pub mod file_cursor;
-pub mod serialize;
+pub mod index;
+pub mod ioutil;
 
 type Trigram = [u8; 3];
 type TrigramID = u32;

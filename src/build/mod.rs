@@ -6,13 +6,12 @@ use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{
-    serialize::{StreamWriter, U32Compressor, U32DeltaCompressor},
-    Trigram,
-};
+use crate::Trigram;
 use crate::{DocID, TrigramID};
 
+pub mod serialize;
 pub mod stats;
+use serialize::{StreamWriter, U32Compressor, U32DeltaCompressor};
 use stats::{IndexStats, SequenceStats, TrigramPostingStats};
 
 use self::stats::{BuildStats, ExtractStats};
