@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{Read, Result, Seek, SeekFrom, Write};
+use std::marker::PhantomData;
 use std::os::unix::fs::FileExt;
 
 pub struct FileCursor {
@@ -121,5 +122,24 @@ impl<S: Seek> Seek for IOSection<S> {
         self.inner
             .seek(SeekFrom::Start(self.rel_offset + self.start))?;
         Ok(self.rel_offset)
+    }
+}
+
+pub trait SectionType {}
+impl<T: SectionType> SectionType for Section<T> {}
+
+pub struct Section<T: SectionType> {
+    offset: u64,
+    len: u64,
+    _type: PhantomData<T>,
+}
+
+impl<T: SectionType> Section<T> {
+    pub fn new(offset: u64, len: u64) -> Self {
+        Self {
+            offset,
+            len,
+            _type: PhantomData::<T>,
+        }
     }
 }

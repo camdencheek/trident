@@ -3,20 +3,33 @@ use std::{
     marker::PhantomData,
 };
 
+use anyhow::Result;
+
+use super::ioutil::{Section, SectionType};
 use crate::Trigram;
 
 pub trait ReadSeek: Read + Seek {}
 
-struct Index<T: Read + Seek> {
+struct Index {
     header: IndexHeader,
     unique_trigrams: Vec<Trigram>,
     // TODO this can probably be represented more densely
     trigram_posting_ends: Vec<u64>,
-    inner: T,
+    source: Box<dyn ReadSeek>, // boxed to reduce generic noise
 }
 
-impl<T: Read + Seek> Index<T> {
-    fn trigram_section(&self, t: Trigram) -> Option<Section<TrigramPostings>> {
+impl Index {
+    pub fn new(source: Box<dyn ReadSeek>) -> Result<Self> {
+        let header = Self::read_header(source.as_ref())?;
+
+        todo!()
+    }
+
+    fn read_header(source: &dyn ReadSeek) -> Result<IndexHeader> {
+        todo!()
+    }
+
+    fn trigram_section(&self, t: Trigram) -> Option<TrigramPostingSection> {
         let trigram_idx = match self.unique_trigrams.binary_search(&t) {
             Ok(idx) => idx,
             Err(_) => return None,
@@ -35,32 +48,20 @@ impl<T: Read + Seek> Index<T> {
 }
 
 struct IndexHeader {
-    trigram_postings: Section<FullIndex>,
-    trigram_posting_ends: Section<FullIndex>,
+    trigram_postings: TrigramPostingsSection,
+    trigram_posting_ends: TrigramPostingEndsSection,
+    unique_trigrams: UniqueTrigramsSection,
 }
-
-trait SectionType {}
 
 // A section relative to the full index
 struct FullIndex;
 impl SectionType for FullIndex {}
 
-// A section relative to the Trigram Postings section
-struct TrigramPostings;
-impl SectionType for TrigramPostings {}
-
-struct Section<T: SectionType> {
-    offset: u64,
-    len: u64,
-    _type: PhantomData<T>,
-}
-
-impl<T: SectionType> Section<T> {
-    fn new(offset: u64, len: u64) -> Self {
-        Self {
-            offset,
-            len,
-            _type: PhantomData::<T>,
-        }
-    }
-}
+type UniqueTrigramsSection = Section<FullIndex>;
+type TrigramPostingEndsSection = Section<FullIndex>;
+type TrigramPostingsSection = Section<FullIndex>;
+type TrigramPostingSection = Section<TrigramPostingsSection>;
+type UniqueSuccessorsSection = Section<TrigramPostingSection>;
+type UniqueDocsSection = Section<TrigramPostingSection>;
+type RunLengthsSection = Section<TrigramPostingSection>;
+type SuccessorsSection = Section<TrigramPostingSection>;
