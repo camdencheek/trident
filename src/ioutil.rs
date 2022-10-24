@@ -57,11 +57,22 @@ impl Seek for FileCursor {
     }
 }
 
-struct IOSection<T> {
+pub struct IOSection<T> {
     start: u64,
     end: u64,
     rel_offset: u64,
     inner: T,
+}
+
+impl<T> IOSection<T> {
+    pub fn new(inner: T, start: u64, end: u64) -> Self {
+        Self {
+            start,
+            end,
+            rel_offset: start,
+            inner,
+        }
+    }
 }
 
 impl<R: Read> Read for IOSection<R> {
@@ -129,8 +140,8 @@ pub trait SectionType {}
 impl<T: SectionType> SectionType for Section<T> {}
 
 pub struct Section<T: SectionType> {
-    offset: u64,
-    len: u64,
+    pub offset: u64,
+    pub len: u64,
     _type: PhantomData<T>,
 }
 
