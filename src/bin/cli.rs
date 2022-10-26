@@ -121,7 +121,7 @@ fn search(args: SearchArgs) -> Result<()> {
     trigram.copy_from_slice(args.query[0..3].as_bytes());
     let mut successor = [0u8; 3];
     successor.copy_from_slice(args.query[3..].as_bytes());
-    for doc in index.search(&trigram, &successor) {
+    for doc in index.search(&trigram.into(), &successor.into()) {
         println!("{}", doc);
     }
     Ok(())

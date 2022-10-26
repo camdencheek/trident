@@ -10,7 +10,7 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use super::ioutil::{Section, SectionType};
 use crate::build::serialize::{U32Decompressor, U32DeltaDecompressor};
-use crate::build::trigram_to_id;
+use crate::TrigramID;
 use crate::{build::serialize::StreamWriter, DocID, LocalDocID, LocalSuccessorID, Trigram};
 
 pub trait ReadSeek: Read + Seek {}
@@ -41,9 +41,9 @@ where
             r
         };
         for _ in 0..n_trigrams {
-            let mut buf: Trigram = [0u8; 3];
+            let mut buf = [0u8; 3];
             unique_trigrams_reader.read_exact(&mut buf)?;
-            unique_trigrams.push(buf)
+            unique_trigrams.push(Trigram(buf))
         }
 
         assert!(header.trigram_posting_ends.len % 4 == 0);
@@ -119,7 +119,7 @@ where
         let unique_docs_section = tp.narrow(section.narrow(header.unique_docs_section()));
 
         // TODO: clean up this garbage
-        let target_successor_id = trigram_to_id(*successor);
+        let target_successor_id = TrigramID::from(*successor);
         let unique_successors_reader = {
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(unique_successors_section.offset))
