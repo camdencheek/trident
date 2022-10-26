@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ops::RangeFrom;
 use std::time::Instant;
 use std::{io::Write, time::Duration};
@@ -6,6 +7,8 @@ use anyhow::Result;
 use byteorder::{LittleEndian, WriteBytesExt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::index::{IndexHeader, PostingHeader};
+use crate::ioutil::Section;
 use crate::Trigram;
 use crate::{DocID, TrigramID};
 
@@ -18,7 +21,7 @@ use self::stats::{BuildStats, ExtractStats};
 
 pub struct IndexBuilder {
     doc_ids: RangeFrom<DocID>,
-    combined: FxHashMap<Trigram, Vec<(DocID, FxHashSet<Trigram>)>>,
+    combined: BTreeMap<Trigram, Vec<(DocID, FxHashSet<Trigram>)>>,
 
     // Reusable buffers
     buf_trigram_set: FxHashSet<Trigram>,
@@ -35,7 +38,7 @@ impl Default for IndexBuilder {
     fn default() -> Self {
         Self {
             doc_ids: 0..,
-            combined: FxHashMap::default(),
+            combined: BTreeMap::default(),
             buf_trigram_set: FxHashSet::default(),
             buf_u32: Vec::default(),
             creation_time: Instant::now(),
@@ -133,46 +136,47 @@ impl IndexBuilder {
         Ok((
             unique_trigrams,
             SequenceStats {
-                len: self.buf_u32.len(),
+                count: self.buf_u32.len(),
                 bytes: compressed_size,
             },
         ))
     }
 
-    fn build_run_lens<W: Write>(
-        &mut self,
-        w: &mut W,
-        docs: &[(DocID, FxHashSet<Trigram>)],
-    ) -> Result<SequenceStats> {
-        // Collect the set into a vec of the trigrams' u32 representation and sort
-        self.buf_u32.clear();
-        self.buf_u32
-            .extend(docs.iter().map(|(_, successors)| successors.len() as u32));
+    // fn build_run_lens<W: Write>(
+    //     &mut self,
+    //     w: &mut W,
+    //     docs: &[(DocID, FxHashSet<Trigram>)],
+    // ) -> Result<SequenceStats> {
+    //     // Collect the set into a vec of the trigrams' u32 representation and sort
+    //     self.buf_u32.clear();
+    //     self.buf_u32
+    //         .extend(docs.iter().map(|(_, successors)| successors.len() as u32));
 
-        let compressed_size = U32Compressor(&self.buf_u32).write_to(w)?;
+    //     let compressed_size = U32Compressor(&self.buf_u32).write_to(w)?;
 
-        Ok(SequenceStats {
-            len: self.buf_u32.len(),
-            bytes: compressed_size,
-        })
-    }
+    //     Ok(SequenceStats {
+    //         len: self.buf_u32.len(),
+    //         bytes: compressed_size,
+    //     })
+    // }
 
+    // Called per unique trigram
     fn build_successors<W: Write>(
         &mut self,
         w: &mut W,
-        unique_trigrams: &[TrigramID],
+        unique_successors: &[TrigramID],
         docs: &[(DocID, FxHashSet<Trigram>)],
     ) -> Result<SequenceStats> {
         self.buf_u32.clear();
-        for (_, successors) in docs {
-            let last_successor = self.buf_u32.last().copied().unwrap_or(0);
+        for (local_doc_id, (_, successors)) in docs.iter().enumerate() {
+            let offset = local_doc_id * unique_successors.len();
             self.buf_u32.extend(
                 successors
                     .iter()
                     .copied()
                     .map(trigram_to_id)
-                    .map(|t| unique_trigrams.binary_search(&t).unwrap() as u32)
-                    .map(|t| t + last_successor),
+                    .map(|t| unique_successors.binary_search(&t).unwrap() as u32)
+                    .map(|t| t + offset as u32),
             );
             let l = self.buf_u32.len();
             self.buf_u32[l - successors.len()..].sort();
@@ -181,7 +185,7 @@ impl IndexBuilder {
         let compressed_size = U32DeltaCompressor(&self.buf_u32).write_to(w)?;
 
         Ok(SequenceStats {
-            len: self.buf_u32.len(),
+            count: self.buf_u32.len(),
             bytes: compressed_size,
         })
     }
@@ -197,7 +201,7 @@ impl IndexBuilder {
         let compressed_size = U32DeltaCompressor(&self.buf_u32).write_to(w)?;
 
         Ok(SequenceStats {
-            len: self.buf_u32.len(),
+            count: self.buf_u32.len(),
             bytes: compressed_size,
         })
     }
@@ -211,15 +215,16 @@ impl IndexBuilder {
 
         let (unique_successors, unique_successors_stats) =
             self.build_unique_successors(&mut buf, &docs)?;
-        let run_lengths_stats = self.build_run_lens(&mut buf, &docs)?;
         let successors_stats = self.build_successors(&mut buf, &unique_successors, &docs)?;
         let unique_docs_stats = self.build_unique_docs(&mut buf, &docs)?;
 
         let header = PostingHeader {
-            unique_successors_len: unique_successors_stats.bytes.try_into()?,
-            doc_lens_len: run_lengths_stats.bytes.try_into()?,
-            successors_len: successors_stats.bytes.try_into()?,
-            doc_ids_len: unique_docs_stats.bytes.try_into()?,
+            unique_successors_count: unique_successors_stats.count.try_into()?,
+            unique_successors_bytes: unique_successors_stats.bytes.try_into()?,
+            successors_count: successors_stats.count.try_into()?,
+            successors_bytes: successors_stats.bytes.try_into()?,
+            unique_docs_count: unique_docs_stats.count.try_into()?,
+            unique_docs_bytes: unique_docs_stats.bytes.try_into()?,
         };
 
         let header_bytes = header.write_to(w)?;
@@ -228,7 +233,6 @@ impl IndexBuilder {
         Ok(TrigramPostingStats {
             header_bytes,
             unique_successors: unique_successors_stats,
-            run_lengths: run_lengths_stats,
             successors: successors_stats,
             unique_docs: unique_docs_stats,
         })
@@ -245,22 +249,39 @@ impl IndexBuilder {
         let build_start = Instant::now();
         let mut build_stats = BuildStats::default();
         let mut posting_ends: Vec<(Trigram, u64)> = Vec::new();
+        let mut postings_len: u64 = 0;
 
         for (trigram, docs) in std::mem::take(&mut self.combined).into_iter() {
             let posting_stats = self.build_posting(w, &docs)?;
             build_stats.add_posting(&posting_stats);
             posting_ends.push((trigram, posting_stats.total_bytes() as u64));
+            postings_len += posting_stats.total_bytes() as u64;
         }
 
         // TODO compress this into blocks, btree style
+        let mut unique_trigrams_len = 0;
+        for (trigram, _) in posting_ends.iter() {
+            unique_trigrams_len += w.write(trigram)?;
+        }
+
         let mut offsets_len = 0;
-        for (trigram, end_offset) in posting_ends {
-            offsets_len += w.write(&trigram)?;
-            w.write_u64::<LittleEndian>(end_offset)?;
+        for (_, offset) in posting_ends.iter() {
+            w.write_u64::<LittleEndian>(*offset)?;
             offsets_len += 4;
         }
 
-        build_stats.posting_offsets_bytes = offsets_len;
+        let header = IndexHeader {
+            trigram_postings: Section::new(0, postings_len),
+            unique_trigrams: Section::new(postings_len, unique_trigrams_len as u64),
+            trigram_posting_ends: Section::new(
+                postings_len + unique_trigrams_len as u64,
+                offsets_len,
+            ),
+        };
+
+        header.write_to(w)?;
+
+        build_stats.posting_offsets_bytes = offsets_len as usize;
         build_stats.build_time = build_start.elapsed();
 
         Ok(IndexStats {
@@ -271,34 +292,16 @@ impl IndexBuilder {
     }
 }
 
-fn trigram_to_id(t: Trigram) -> TrigramID {
+pub fn trigram_to_id(t: Trigram) -> TrigramID {
     ((t[0] as u32) << 16) + ((t[1] as u32) << 8) + t[2] as u32
 }
 
-fn trigram_from_id(t: TrigramID) -> Trigram {
+pub fn trigram_from_id(t: TrigramID) -> Trigram {
     [
         ((t & 0x00FF0000) >> 16) as u8,
         ((t & 0x0000FF00) >> 8) as u8,
         (t & 0x000000FF) as u8,
     ]
-}
-
-#[derive(Clone, Default)]
-struct PostingHeader {
-    unique_successors_len: u32,
-    doc_lens_len: u32,
-    successors_len: u32,
-    doc_ids_len: u32,
-}
-
-impl StreamWriter for PostingHeader {
-    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
-        w.write_u32::<LittleEndian>(self.unique_successors_len)?;
-        w.write_u32::<LittleEndian>(self.doc_lens_len)?;
-        w.write_u32::<LittleEndian>(self.successors_len)?;
-        w.write_u32::<LittleEndian>(self.doc_ids_len)?;
-        Ok(4 * std::mem::size_of::<u32>())
-    }
 }
 
 #[cfg(test)]

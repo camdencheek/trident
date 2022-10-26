@@ -14,8 +14,6 @@ pub struct U32Compressor<'a>(pub &'a [u32]);
 impl StreamWriter for U32Compressor<'_> {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
         let mut size = 0;
-        size += w.write_varint(self.0.len())?;
-
         let mut chunks = self.0.chunks_exact(BitPacker4x::BLOCK_LEN);
 
         {
@@ -42,8 +40,6 @@ pub struct U32DeltaCompressor<'a>(pub &'a [u32]);
 impl StreamWriter for U32DeltaCompressor<'_> {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
         let mut size = 0;
-        size += w.write_varint(self.0.len())?;
-
         let mut chunks = self.0.chunks_exact(BitPacker4x::BLOCK_LEN);
         let mut last = 0;
         {
@@ -90,9 +86,9 @@ impl<R: Read> Iterator for U32Decompressor<R> {
 }
 
 impl<R: Read> U32Decompressor<R> {
-    fn new(mut r: R) -> Self {
+    pub fn new(mut r: R, count: usize) -> Self {
         Self {
-            remaining: r.read_varint().unwrap(),
+            remaining: count,
             r,
             chunk: [0u32; BitPacker4x::BLOCK_LEN],
             chunk_range: 0..0,
@@ -147,9 +143,9 @@ impl<R: Read> Iterator for U32DeltaDecompressor<R> {
 }
 
 impl<R: Read> U32DeltaDecompressor<R> {
-    fn new(mut r: R) -> Self {
+    pub fn new(mut r: R, count: usize) -> Self {
         Self {
-            remaining: r.read_varint().unwrap(),
+            remaining: count,
             r,
             chunk: [0u32; BitPacker4x::BLOCK_LEN],
             chunk_range: 0..0,
@@ -198,7 +194,7 @@ mod test {
         fn compress_roundtrip(input: Vec<u32>) -> bool {
             let mut buf = Vec::new();
             U32Compressor(input.as_slice()).write_to(&mut buf).unwrap();
-            let decompressor = U32Decompressor::new(Cursor::new(buf));
+            let decompressor = U32Decompressor::new(Cursor::new(buf), input.len());
             let output: Vec<u32> = decompressor.collect();
             input == output
         }
@@ -213,7 +209,7 @@ mod test {
             }).collect();
             let mut buf = Vec::new();
             U32DeltaCompressor(input.as_slice()).write_to(&mut buf).unwrap();
-            let decompressor = U32DeltaDecompressor::new(Cursor::new(buf));
+            let decompressor = U32DeltaDecompressor::new(Cursor::new(buf), input.len());
             let output: Vec<u32> = decompressor.collect();
             input == output
         }

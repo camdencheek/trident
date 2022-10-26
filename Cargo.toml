@@ -12,6 +12,7 @@ bytefmt = "0.1.7"
 byteorder = "1.4.3"
 clap = { version = "4.0.17", features = ["derive"]}
 integer-encoding = "3.0.4"
+itertools = "0.10.5"
 rand = "0.8.5"
 rustc-hash = "1.1.0"
 walkdir = "2.3.2"

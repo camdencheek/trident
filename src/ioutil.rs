@@ -1,53 +1,62 @@
+use anyhow::Result;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fs::File;
-use std::io::{Read, Result, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::os::unix::fs::FileExt;
+use std::sync::Arc;
 
+use crate::build::serialize::StreamWriter;
+
+#[derive(Clone)]
 pub struct FileCursor {
-    f: File,
+    f: Arc<File>,
     offset: u64,
 }
 
 impl FileCursor {
     pub fn new(f: File) -> Self {
-        Self { f, offset: 0 }
+        Self {
+            f: Arc::new(f),
+            offset: 0,
+        }
     }
 }
 
 impl Read for FileCursor {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.f.read_at(buf, self.offset)?;
         self.offset += n as u64;
         Ok(n)
     }
 
-    fn read_exact(&mut self, buf: &mut [u8]) -> Result<()> {
+    fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
         self.f.read_exact_at(buf, self.offset)?;
         self.offset += buf.len() as u64;
         Ok(())
     }
 }
 
-impl Write for FileCursor {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        let n = self.f.write_at(buf, self.offset)?;
-        self.offset += n as u64;
-        Ok(n)
-    }
+// impl Write for FileCursor {
+//     fn write(&mut self, buf: &[u8]) -> Result<usize> {
+//         let n = self.f.write_at(buf, self.offset)?;
+//         self.offset += n as u64;
+//         Ok(n)
+//     }
 
-    fn write_all(&mut self, buf: &[u8]) -> Result<()> {
-        self.f.write_all_at(buf, self.offset)?;
-        self.offset += buf.len() as u64;
-        Ok(())
-    }
+//     fn write_all(&mut self, buf: &[u8]) -> Result<()> {
+//         self.f.write_all_at(buf, self.offset)?;
+//         self.offset += buf.len() as u64;
+//         Ok(())
+//     }
 
-    fn flush(&mut self) -> Result<()> {
-        self.f.flush()
-    }
-}
+//     fn flush(&mut self) -> Result<()> {
+//         self.f.flush()
+//     }
+// }
 
 impl Seek for FileCursor {
-    fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         match pos {
             SeekFrom::Current(i) => self.offset = (self.offset as i64 + i) as u64,
             SeekFrom::Start(i) => self.offset = i,
@@ -57,100 +66,36 @@ impl Seek for FileCursor {
     }
 }
 
-pub struct IOSection<T> {
-    start: u64,
-    end: u64,
-    rel_offset: u64,
-    inner: T,
-}
-
-impl<T> IOSection<T> {
-    pub fn new(inner: T, start: u64, end: u64) -> Self {
-        Self {
-            start,
-            end,
-            rel_offset: start,
-            inner,
-        }
-    }
-}
-
-impl<R: Read> Read for IOSection<R> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        // Read nothing if the cursor is past end
-        if self.rel_offset >= self.end {
-            return Ok(0);
-        }
-        let sz = buf.len().max((self.end - self.rel_offset) as usize);
-        let buf = &mut buf[..sz];
-        let n = self.inner.read(buf)?;
-        self.rel_offset += n as u64;
-        Ok(n)
-    }
-
-    // TODO more efficient optional implementations for things like read_exact
-}
-
-impl<W: Write> Write for IOSection<W> {
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        // Write nothing if the cursor is past end
-        if self.rel_offset >= self.end {
-            return Ok(0);
-        }
-        let sz = buf.len().max((self.end - self.rel_offset) as usize);
-        let buf = &buf[..sz];
-        let n = self.inner.write(buf)?;
-        self.rel_offset += n as u64;
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        self.inner.flush()
-    }
-}
-
-impl<S: Seek> Seek for IOSection<S> {
-    fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
-        match pos {
-            SeekFrom::Current(i) => {
-                let mut new = self.rel_offset as i64 + i;
-                if new < 0 {
-                    // TODO: we should probably throw an error here
-                    new = 0;
-                }
-                self.rel_offset = new as u64;
-            }
-            SeekFrom::Start(i) => self.rel_offset = i,
-            SeekFrom::End(i) => {
-                let mut new = self.end as i64 + i;
-                if new < 0 {
-                    // TODO: we should probably throw an error here
-                    new = 0;
-                }
-                self.rel_offset = new as u64;
-            }
-        };
-        self.inner
-            .seek(SeekFrom::Start(self.rel_offset + self.start))?;
-        Ok(self.rel_offset)
-    }
-}
-
 pub trait SectionType {}
 impl<T: SectionType> SectionType for Section<T> {}
+impl SectionType for () {}
 
-pub struct Section<T: SectionType> {
+#[derive(Debug, Copy, Clone)]
+pub struct Section<P: SectionType = ()> {
     pub offset: u64,
     pub len: u64,
-    _type: PhantomData<T>,
+    _parent_type: PhantomData<P>,
 }
 
-impl<T: SectionType> Section<T> {
+impl<T: SectionType> StreamWriter for Section<T> {
+    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+        w.write_u64::<LittleEndian>(self.offset)?;
+        w.write_u64::<LittleEndian>(self.len)?;
+        Ok(std::mem::size_of::<u64> as usize * 2)
+    }
+}
+
+impl<P: SectionType> Section<P> {
     pub fn new(offset: u64, len: u64) -> Self {
         Self {
             offset,
             len,
-            _type: PhantomData::<T>,
+            _parent_type: PhantomData::<P>,
         }
+    }
+
+    pub fn narrow(&self, child: Section<Self>) -> Self {
+        assert!(child.offset + child.len <= self.len);
+        Self::new(self.offset + child.offset, child.len)
     }
 }

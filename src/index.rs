@@ -1,52 +1,59 @@
+use std::os::unix::fs::FileExt;
 use std::{
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     marker::PhantomData,
 };
 
 use anyhow::Result;
-use byteorder::{LittleEndian, ReadBytesExt};
+use bitpacking::{BitPacker, BitPacker4x};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use super::ioutil::{Section, SectionType};
-use crate::{ioutil::IOSection, DocID, Trigram};
+use crate::build::serialize::{U32Decompressor, U32DeltaDecompressor};
+use crate::build::trigram_to_id;
+use crate::{build::serialize::StreamWriter, DocID, LocalDocID, LocalSuccessorID, Trigram};
 
 pub trait ReadSeek: Read + Seek {}
 
-struct Index {
+pub struct Index<R> {
     header: IndexHeader,
     // TODO this can probably be represented more densely
     // TODO even better, this should just stay on disk. Keeping it in memory for now to compare
     // more directly with Zoekt.
     unique_trigrams: Vec<Trigram>,
     trigram_posting_ends: Vec<u64>,
-    source: Box<dyn ReadSeek>, // boxed to reduce generic noise
+    r: R,
 }
 
-impl Index {
-    pub fn new(mut source: Box<dyn ReadSeek>) -> Result<Self> {
-        let header = Self::read_header(source.as_mut())?;
+impl<R> Index<R>
+where
+    R: Read + Seek + Clone,
+{
+    pub fn new(mut r: R) -> Result<Self> {
+        let header = Self::read_header(&mut r)?;
 
         assert!(header.unique_trigrams.len % 3 == 0);
         let n_trigrams = header.unique_trigrams.len as usize / 3;
         let mut unique_trigrams = Vec::with_capacity(n_trigrams);
-        let mut unique_trigrams_reader = IOSection::new(
-            source.as_mut(),
-            header.unique_trigrams.offset,
-            header.unique_trigrams.offset + header.unique_trigrams.len,
-        );
+        let mut unique_trigrams_reader = {
+            let mut r = r.clone();
+            r.seek(SeekFrom::Start(header.unique_trigrams.offset))?;
+            r
+        };
         for _ in 0..n_trigrams {
             let mut buf: Trigram = [0u8; 3];
             unique_trigrams_reader.read_exact(&mut buf)?;
             unique_trigrams.push(buf)
         }
 
-        assert!(header.trigram_posting_ends.len % 3 == 0);
-        assert!(header.trigram_posting_ends.len as usize / 3 == n_trigrams);
+        assert!(header.trigram_posting_ends.len % 4 == 0);
+        assert!(header.trigram_posting_ends.len as usize / 4 == n_trigrams);
         let mut trigram_posting_ends = Vec::with_capacity(n_trigrams);
-        let mut trigram_ends_reader = IOSection::new(
-            source.as_mut(),
-            header.trigram_posting_ends.offset,
-            header.trigram_posting_ends.offset + header.trigram_posting_ends.len,
-        );
+        let mut trigram_ends_reader = {
+            let mut r = r.clone();
+            r.seek(SeekFrom::Start(header.trigram_posting_ends.offset))?;
+            r
+        };
         for _ in 0..n_trigrams {
             trigram_posting_ends.push(trigram_ends_reader.read_u64::<LittleEndian>()?);
         }
@@ -55,33 +62,14 @@ impl Index {
             header,
             unique_trigrams,
             trigram_posting_ends,
-            source,
+            r,
         })
     }
 
     // TODO move this to an IndexHeader method
-    fn read_header(r: &mut dyn ReadSeek) -> Result<IndexHeader> {
+    fn read_header(r: &mut R) -> Result<IndexHeader> {
         r.seek(SeekFrom::End(-(IndexHeader::SIZE_BYTES as i64)))?;
-        let trigram_postings_offset = r.read_u64::<LittleEndian>()?;
-        let trigram_postings_len = r.read_u64::<LittleEndian>()?;
-        let unique_trigrams_offset = r.read_u64::<LittleEndian>()?;
-        let unique_trigrams_len = r.read_u64::<LittleEndian>()?;
-        let trigram_posting_ends_offset = r.read_u64::<LittleEndian>()?;
-        let trigram_posting_ends_len = r.read_u64::<LittleEndian>()?;
-        Ok(IndexHeader {
-            trigram_postings: TrigramPostingsSection::new(
-                trigram_postings_offset,
-                trigram_postings_len,
-            ),
-            unique_trigrams: UniqueTrigramsSection::new(
-                unique_trigrams_offset,
-                unique_trigrams_len,
-            ),
-            trigram_posting_ends: TrigramPostingEndsSection::new(
-                trigram_posting_ends_offset,
-                trigram_posting_ends_len,
-            ),
-        })
+        IndexHeader::read_from(r)
     }
 
     fn trigram_section(&self, t: Trigram) -> Option<TrigramPostingSection> {
@@ -101,28 +89,241 @@ impl Index {
         Some(Section::new(start, end - start))
     }
 
-    fn search(&self) -> Box<dyn Iterator<Item = DocID>> {}
+    pub fn search<'a>(
+        &'a self,
+        trigram: &Trigram,
+        successor: &Trigram,
+    ) -> Box<dyn Iterator<Item = DocID> + 'a> {
+        // If the trigram doesn't exist, return early with an empty iterator
+        let section = match self.trigram_section(*trigram) {
+            Some(s) => s,
+            None => return Box::new(std::iter::empty()),
+        };
+
+        let absolute_section = self.header.trigram_postings.narrow(section);
+        let mut reader = {
+            let mut r = self.r.clone();
+            r.seek(SeekFrom::Start(absolute_section.offset)).unwrap();
+            r
+        };
+        let header = PostingHeader::read_from(&mut reader).unwrap();
+        dbg!(&header);
+
+        let tp = self.header.trigram_postings;
+        dbg!(&tp);
+        dbg!(&section);
+
+        let unique_successors_section =
+            tp.narrow(section.narrow(header.unique_successors_section()));
+        let successors_section = tp.narrow(section.narrow(header.successors_section()));
+        let unique_docs_section = tp.narrow(section.narrow(header.unique_docs_section()));
+
+        // TODO: clean up this garbage
+        let target_successor_id = trigram_to_id(*successor);
+        let unique_successors_reader = {
+            let mut r = self.r.clone();
+            r.seek(SeekFrom::Start(unique_successors_section.offset))
+                .unwrap();
+            r
+        };
+        let target_local_successor_id = match U32DeltaDecompressor::new(
+            unique_successors_reader,
+            header.unique_successors_count as usize,
+        )
+        .enumerate()
+        .find_map(|(local_id, successor_id)| {
+            if successor_id == target_successor_id {
+                Some(local_id)
+            } else {
+                None
+            }
+        }) {
+            Some(l) => l as u32,
+            None => return Box::new(std::iter::empty()),
+        };
+
+        let unique_docs_iter = {
+            let mut r = self.r.clone();
+            r.seek(SeekFrom::Start(unique_docs_section.offset)).unwrap();
+            r
+        };
+        let unique_docs_iter =
+            U32DeltaDecompressor::new(unique_docs_iter, header.unique_docs_count as usize)
+                .enumerate()
+                .map(|(i, d)| (i as u32, d));
+
+        let successors_reader = {
+            let mut r = self.r.clone();
+            r.seek(SeekFrom::Start(successors_section.offset)).unwrap();
+            r
+        };
+        let successors_iter =
+            U32DeltaDecompressor::new(successors_reader, header.successors_count as usize);
+
+        let doc_iter = successors_iter
+            .map(move |i| {
+                (
+                    i / header.unique_successors_count,
+                    i % header.unique_successors_count,
+                )
+            })
+            .filter_map(move |(local_doc_id, local_successor_id)| {
+                if local_successor_id == target_local_successor_id {
+                    Some(local_doc_id)
+                } else {
+                    None
+                }
+            });
+
+        Box::new(DocIDMapper::new(unique_docs_iter, doc_iter))
+    }
 }
 
-struct IndexHeader {
-    trigram_postings: TrigramPostingsSection,
-    unique_trigrams: UniqueTrigramsSection,
-    trigram_posting_ends: TrigramPostingEndsSection,
+#[derive(Debug, Clone)]
+pub struct IndexHeader {
+    pub trigram_postings: TrigramPostingsSection,
+    pub unique_trigrams: UniqueTrigramsSection,
+    pub trigram_posting_ends: TrigramPostingEndsSection,
 }
 
 impl IndexHeader {
     const SIZE_BYTES: usize = 48;
+
+    fn read_from<R: Read>(r: &mut R) -> Result<Self> {
+        let header = IndexHeader {
+            trigram_postings: TrigramPostingsSection::new(
+                r.read_u64::<LittleEndian>()?,
+                r.read_u64::<LittleEndian>()?,
+            ),
+            unique_trigrams: UniqueTrigramsSection::new(
+                r.read_u64::<LittleEndian>()?,
+                r.read_u64::<LittleEndian>()?,
+            ),
+            trigram_posting_ends: TrigramPostingEndsSection::new(
+                r.read_u64::<LittleEndian>()?,
+                r.read_u64::<LittleEndian>()?,
+            ),
+        };
+
+        assert!(header.unique_trigrams.len % 3 == 0);
+        assert!(header.trigram_posting_ends.len % 4 == 0);
+        assert!(header.unique_trigrams.len / 3 == header.trigram_posting_ends.len / 4);
+        Ok(header)
+    }
 }
 
-// A section relative to the full index
-struct FullIndex;
-impl SectionType for FullIndex {}
+impl StreamWriter for IndexHeader {
+    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+        let mut n = self.trigram_postings.write_to(w)?;
+        n += self.unique_trigrams.write_to(w)?;
+        n += self.trigram_posting_ends.write_to(w)?;
+        Ok(n)
+    }
+}
 
-type UniqueTrigramsSection = Section<FullIndex>;
-type TrigramPostingEndsSection = Section<FullIndex>;
-type TrigramPostingsSection = Section<FullIndex>;
+#[derive(Debug, Clone, Default)]
+pub struct PostingHeader {
+    pub unique_successors_count: u32,
+    pub unique_successors_bytes: u32,
+    pub successors_count: u32,
+    pub successors_bytes: u32,
+    pub unique_docs_count: u32,
+    pub unique_docs_bytes: u32,
+}
+
+impl PostingHeader {
+    const SIZE_BYTES: usize = std::mem::size_of::<Self>();
+
+    fn read_from<R: Read>(r: &mut R) -> Result<Self> {
+        Ok(Self {
+            unique_successors_count: r.read_u32::<LittleEndian>()?,
+            unique_successors_bytes: r.read_u32::<LittleEndian>()?,
+            successors_count: r.read_u32::<LittleEndian>()?,
+            successors_bytes: r.read_u32::<LittleEndian>()?,
+            unique_docs_count: r.read_u32::<LittleEndian>()?,
+            unique_docs_bytes: r.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    // TODO make these less error prone
+    fn unique_successors_section(&self) -> UniqueSuccessorsSection {
+        Section::new(Self::SIZE_BYTES as u64, self.unique_successors_bytes as u64)
+    }
+
+    fn successors_section(&self) -> SuccessorsSection {
+        Section::new(
+            Self::SIZE_BYTES as u64
+                + self.unique_successors_bytes as u64
+                + self.unique_docs_bytes as u64,
+            self.successors_bytes as u64,
+        )
+    }
+
+    fn unique_docs_section(&self) -> UniqueDocsSection {
+        Section::new(
+            Self::SIZE_BYTES as u64
+                + self.unique_successors_bytes as u64
+                + self.unique_docs_bytes as u64,
+            self.successors_bytes as u64,
+        )
+    }
+}
+
+impl StreamWriter for PostingHeader {
+    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+        w.write_u32::<LittleEndian>(self.unique_successors_count)?;
+        w.write_u32::<LittleEndian>(self.unique_successors_bytes)?;
+        w.write_u32::<LittleEndian>(self.successors_count)?;
+        w.write_u32::<LittleEndian>(self.successors_bytes)?;
+        w.write_u32::<LittleEndian>(self.unique_docs_count)?;
+        w.write_u32::<LittleEndian>(self.unique_docs_bytes)?;
+        Ok(6 * std::mem::size_of::<u32>())
+    }
+}
+
+// Named types for each unique type of section
+type UniqueTrigramsSection = Section;
+type TrigramPostingEndsSection = Section;
+type TrigramPostingsSection = Section;
 type TrigramPostingSection = Section<TrigramPostingsSection>;
 type UniqueSuccessorsSection = Section<TrigramPostingSection>;
 type UniqueDocsSection = Section<TrigramPostingSection>;
 type RunLengthsSection = Section<TrigramPostingSection>;
 type SuccessorsSection = Section<TrigramPostingSection>;
+
+struct DocIDMapper<DI, LDI> {
+    doc_id_iterator: DI,
+    local_doc_iterator: LDI,
+}
+
+impl<DI, LDI> DocIDMapper<DI, LDI>
+where
+    DI: Iterator<Item = (LocalDocID, DocID)>,
+    LDI: Iterator<Item = LocalDocID>,
+{
+    pub fn new(doc_id_iterator: DI, local_doc_iterator: LDI) -> Self {
+        Self {
+            doc_id_iterator,
+            local_doc_iterator,
+        }
+    }
+}
+
+impl<DI, LDI> Iterator for DocIDMapper<DI, LDI>
+where
+    DI: Iterator<Item = (LocalDocID, DocID)>,
+    LDI: Iterator<Item = LocalDocID>,
+{
+    type Item = DocID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ldi = self.local_doc_iterator.next()?;
+        while let Some((local_id, doc_id)) = self.doc_id_iterator.next() {
+            // TODO we can likely make this more efficient by skipping chunks at a time
+            if local_id == ldi {
+                return Some(doc_id);
+            }
+        }
+        None
+    }
+}

@@ -75,9 +75,6 @@ pub struct TrigramPostingStats {
     // Stats for the unique successors
     pub unique_successors: SequenceStats,
 
-    // Stats for the equal-doc run lengths in successors
-    pub run_lengths: SequenceStats,
-
     // Stats for the successors list
     pub successors: SequenceStats,
 
@@ -90,7 +87,6 @@ impl TrigramPostingStats {
         Self {
             header_bytes: usize::MAX,
             unique_successors: SequenceStats::new_max(),
-            run_lengths: SequenceStats::new_max(),
             successors: SequenceStats::new_max(),
             unique_docs: SequenceStats::new_max(),
         }
@@ -99,7 +95,6 @@ impl TrigramPostingStats {
     pub fn total_bytes(&self) -> usize {
         self.header_bytes
             + self.unique_successors.bytes
-            + self.run_lengths.bytes
             + self.successors.bytes
             + self.unique_docs.bytes
     }
@@ -109,7 +104,6 @@ impl TrigramPostingStats {
             header_bytes: self.header_bytes.max(other.header_bytes),
             unique_successors: self.unique_successors.max(&other.unique_successors),
             unique_docs: self.unique_docs.max(&other.unique_docs),
-            run_lengths: self.run_lengths.max(&other.run_lengths),
             successors: self.successors.max(&other.successors),
         }
     }
@@ -119,7 +113,6 @@ impl TrigramPostingStats {
             header_bytes: self.header_bytes.min(other.header_bytes),
             unique_successors: self.unique_successors.min(&other.unique_successors),
             unique_docs: self.unique_docs.min(&other.unique_docs),
-            run_lengths: self.run_lengths.min(&other.run_lengths),
             successors: self.successors.min(&other.successors),
         }
     }
@@ -129,7 +122,6 @@ impl TrigramPostingStats {
             header_bytes: self.header_bytes + other.header_bytes,
             unique_successors: self.unique_successors.sum(&other.unique_successors),
             unique_docs: self.unique_docs.sum(&other.unique_docs),
-            run_lengths: self.run_lengths.sum(&other.run_lengths),
             successors: self.successors.sum(&other.successors),
         }
     }
@@ -138,8 +130,8 @@ impl TrigramPostingStats {
 // Stats about the serialization of an integer sequence
 #[derive(Default, Debug)]
 pub struct SequenceStats {
-    // The length of the sequence
-    pub len: usize,
+    // The number of elements in the sequence
+    pub count: usize,
 
     // The size of the compressed sequence in bytes
     pub bytes: usize,
@@ -148,28 +140,28 @@ pub struct SequenceStats {
 impl SequenceStats {
     pub fn new_max() -> Self {
         Self {
-            len: usize::MAX,
+            count: usize::MAX,
             bytes: usize::MAX,
         }
     }
 
     pub fn max(&self, other: &SequenceStats) -> SequenceStats {
         Self {
-            len: self.len.max(other.len),
+            count: self.count.max(other.count),
             bytes: self.bytes.max(other.bytes),
         }
     }
 
     pub fn min(&self, other: &SequenceStats) -> SequenceStats {
         Self {
-            len: self.len.min(other.len),
+            count: self.count.min(other.count),
             bytes: self.bytes.min(other.bytes),
         }
     }
 
     pub fn sum(&self, other: &SequenceStats) -> SequenceStats {
         Self {
-            len: self.len + other.len,
+            count: self.count + other.count,
             bytes: self.bytes + other.bytes,
         }
     }

@@ -1,4 +1,4 @@
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::{fs::File, path::PathBuf};
 
 use anyhow::Result;
@@ -6,6 +6,8 @@ use clap::{Parser, Subcommand};
 
 use trident::build::stats::IndexStats;
 use trident::build::IndexBuilder;
+use trident::index::Index;
+use trident::ioutil::FileCursor;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
@@ -29,20 +31,8 @@ pub struct IndexArgs {
 
 #[derive(Parser, Debug)]
 pub struct SearchArgs {
-    pub shard: PathBuf,
-    pub queries: Vec<String>,
-    #[clap(long = "skip-index")]
-    pub skip_index: bool,
-    #[clap(long = "count-only")]
-    pub count_only: bool,
-    #[clap(long = "repeat", short = 'r', default_value = "1")]
-    pub repeat: usize,
-    #[clap(long = "limit", short = 'l')]
-    pub limit: Option<usize>,
-    #[clap(long = "cache-size")]
-    pub cache_size: Option<String>,
-    #[clap(long = "no-cache")]
-    pub no_cache: bool,
+    pub index_path: PathBuf,
+    pub query: String,
 }
 
 fn main() -> Result<()> {
@@ -110,9 +100,6 @@ fn summarize_stats(stats: IndexStats) {
         stats.build.postings_sum.unique_successors.bytes as f64 / index_size as f64;
     println!("\tUnique successors: {:.3}", unique_successors_ratio);
 
-    let run_lengths_ratio = stats.build.postings_sum.run_lengths.bytes as f64 / index_size as f64;
-    println!("\tRun lengths: {:.3}", run_lengths_ratio);
-
     let successors_ratio = stats.build.postings_sum.successors.bytes as f64 / index_size as f64;
     println!("\tSuccessors: {:.3}", successors_ratio);
 
@@ -127,5 +114,15 @@ fn summarize_stats(stats: IndexStats) {
 }
 
 fn search(args: SearchArgs) -> Result<()> {
-    unimplemented!()
+    let index_file = File::open(args.index_path)?;
+    let index = Index::new(FileCursor::new(index_file))?;
+    assert!(args.query.len() == 6);
+    let mut trigram = [0u8; 3];
+    trigram.copy_from_slice(args.query[0..3].as_bytes());
+    let mut successor = [0u8; 3];
+    successor.copy_from_slice(args.query[3..].as_bytes());
+    for doc in index.search(&trigram, &successor) {
+        println!("{}", doc);
+    }
+    Ok(())
 }
