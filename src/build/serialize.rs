@@ -201,12 +201,9 @@ mod test {
     }
 
     quickcheck! {
-        fn compress_roundtrip_delta(input: Vec<u16>) -> bool {
-            let mut sum: u32 = 0;
-            let input: Vec<u32> = input.iter().map(|x| {
-                sum += *x as u32;
-                sum
-            }).collect();
+        fn compress_roundtrip_delta(input: Vec<u32>) -> bool {
+            let mut input = input;
+            input.sort();
             let mut buf = Vec::new();
             U32DeltaCompressor(input.as_slice()).write_to(&mut buf).unwrap();
             let decompressor = U32DeltaDecompressor::new(Cursor::new(buf), input.len());
