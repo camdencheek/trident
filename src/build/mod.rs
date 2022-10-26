@@ -133,10 +133,11 @@ impl IndexBuilder {
 
         let compressed_size = U32DeltaCompressor(&unique_trigrams).write_to(w)?;
 
+        let unique_trigrams_count = unique_trigrams.len();
         Ok((
             unique_trigrams,
             SequenceStats {
-                count: self.buf_u32.len(),
+                count: unique_trigrams_count,
                 bytes: compressed_size,
             },
         ))

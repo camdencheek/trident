@@ -291,7 +291,6 @@ type TrigramPostingsSection = Section;
 type TrigramPostingSection = Section<TrigramPostingsSection>;
 type UniqueSuccessorsSection = Section<TrigramPostingSection>;
 type UniqueDocsSection = Section<TrigramPostingSection>;
-type RunLengthsSection = Section<TrigramPostingSection>;
 type SuccessorsSection = Section<TrigramPostingSection>;
 
 struct DocIDMapper<DI, LDI> {

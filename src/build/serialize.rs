@@ -160,6 +160,7 @@ impl<R: Read> U32DeltaDecompressor<R> {
             let num_bits = {
                 let mut buf = [0; 1];
                 self.r.read_exact(&mut buf).unwrap();
+                assert!(buf[0] < 32);
                 buf[0]
             };
             let num_bytes = num_bits as usize * BitPacker4x::BLOCK_LEN / 8;
