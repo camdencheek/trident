@@ -57,6 +57,7 @@ where
         for _ in 0..n_trigrams {
             trigram_posting_ends.push(trigram_ends_reader.read_u64::<LittleEndian>()?);
         }
+        dbg!(&trigram_posting_ends);
 
         Ok(Self {
             header,
@@ -94,13 +95,16 @@ where
         trigram: &Trigram,
         successor: &Trigram,
     ) -> Box<dyn Iterator<Item = DocID> + 'a> {
+        dbg!(trigram, successor);
         // If the trigram doesn't exist, return early with an empty iterator
         let section = match self.trigram_section(*trigram) {
             Some(s) => s,
             None => return Box::new(std::iter::empty()),
         };
+        dbg!(&section);
 
         let absolute_section = self.header.trigram_postings.narrow(section);
+        dbg!(&absolute_section);
         let mut reader = {
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(absolute_section.offset)).unwrap();
@@ -110,8 +114,6 @@ where
         dbg!(&header);
 
         let tp = self.header.trigram_postings;
-        dbg!(&tp);
-        dbg!(&section);
 
         let unique_successors_section =
             tp.narrow(section.narrow(header.unique_successors_section()));
@@ -132,6 +134,7 @@ where
         )
         .enumerate()
         .find_map(|(local_id, successor_id)| {
+            dbg!(Trigram::from(successor_id));
             if successor_id == target_successor_id {
                 Some(local_id)
             } else {

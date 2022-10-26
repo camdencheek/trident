@@ -14,7 +14,7 @@ use crate::{DocID, TrigramID};
 
 pub mod serialize;
 pub mod stats;
-use serialize::{StreamWriter, U32Compressor, U32DeltaCompressor};
+use serialize::{StreamWriter, U32DeltaCompressor};
 use stats::{IndexStats, SequenceStats, TrigramPostingStats};
 
 use self::stats::{BuildStats, ExtractStats};
@@ -142,24 +142,6 @@ impl IndexBuilder {
         ))
     }
 
-    // fn build_run_lens<W: Write>(
-    //     &mut self,
-    //     w: &mut W,
-    //     docs: &[(DocID, FxHashSet<Trigram>)],
-    // ) -> Result<SequenceStats> {
-    //     // Collect the set into a vec of the trigrams' u32 representation and sort
-    //     self.buf_u32.clear();
-    //     self.buf_u32
-    //         .extend(docs.iter().map(|(_, successors)| successors.len() as u32));
-
-    //     let compressed_size = U32Compressor(&self.buf_u32).write_to(w)?;
-
-    //     Ok(SequenceStats {
-    //         len: self.buf_u32.len(),
-    //         bytes: compressed_size,
-    //     })
-    // }
-
     // Called per unique trigram
     fn build_successors<W: Write>(
         &mut self,
@@ -254,8 +236,8 @@ impl IndexBuilder {
         for (trigram, docs) in std::mem::take(&mut self.combined).into_iter() {
             let posting_stats = self.build_posting(w, &docs)?;
             build_stats.add_posting(&posting_stats);
-            posting_ends.push((trigram, posting_stats.total_bytes() as u64));
             postings_len += posting_stats.total_bytes() as u64;
+            posting_ends.push((trigram, postings_len));
         }
 
         // TODO compress this into blocks, btree style

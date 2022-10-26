@@ -39,6 +39,7 @@ pub struct U32DeltaCompressor<'a>(pub &'a [u32]);
 
 impl StreamWriter for U32DeltaCompressor<'_> {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+        assert!(self.0.is_sorted());
         let mut size = 0;
         let mut chunks = self.0.chunks_exact(BitPacker4x::BLOCK_LEN);
         let mut last = 0;
