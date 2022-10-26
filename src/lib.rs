@@ -13,7 +13,7 @@ type LocalSuccessorID = u32;
 type DocID = u32;
 type LocalDocID = u32;
 
-#[derive(Eq, PartialOrd, Ord, PartialEq, Hash, Copy, Clone)]
+#[derive(Default, Eq, PartialOrd, Ord, PartialEq, Hash, Copy, Clone)]
 pub struct Trigram([u8; 3]);
 
 impl fmt::Debug for Trigram {

@@ -57,7 +57,6 @@ where
         for _ in 0..n_trigrams {
             trigram_posting_ends.push(trigram_ends_reader.read_u64::<LittleEndian>()?);
         }
-        dbg!(&trigram_posting_ends);
 
         Ok(Self {
             header,
@@ -95,23 +94,19 @@ where
         trigram: &Trigram,
         successor: &Trigram,
     ) -> Box<dyn Iterator<Item = DocID> + 'a> {
-        dbg!(trigram, successor);
         // If the trigram doesn't exist, return early with an empty iterator
         let section = match self.trigram_section(*trigram) {
             Some(s) => s,
             None => return Box::new(std::iter::empty()),
         };
-        dbg!(&section);
 
         let absolute_section = self.header.trigram_postings.narrow(section);
-        dbg!(&absolute_section);
         let mut reader = {
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(absolute_section.offset)).unwrap();
             r
         };
         let header = PostingHeader::read_from(&mut reader).unwrap();
-        dbg!(&header);
 
         let tp = self.header.trigram_postings;
 
@@ -134,7 +129,6 @@ where
         )
         .enumerate()
         .find_map(|(local_id, successor_id)| {
-            dbg!(Trigram::from(successor_id));
             if successor_id == target_successor_id {
                 Some(local_id)
             } else {
@@ -145,15 +139,16 @@ where
             None => return Box::new(std::iter::empty()),
         };
 
-        let unique_docs_iter = {
+        let unique_docs_reader = {
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(unique_docs_section.offset)).unwrap();
             r
         };
         let unique_docs_iter =
-            U32DeltaDecompressor::new(unique_docs_iter, header.unique_docs_count as usize)
+            U32DeltaDecompressor::new(unique_docs_reader, header.unique_docs_count as usize)
                 .enumerate()
-                .map(|(i, d)| (i as u32, d));
+                .map(|(i, d)| (i as u32, d))
+                .collect::<Vec<_>>(); // TODO: get rid of this
 
         let successors_reader = {
             let mut r = self.r.clone();
@@ -161,9 +156,11 @@ where
             r
         };
         let successors_iter =
-            U32DeltaDecompressor::new(successors_reader, header.successors_count as usize);
+            U32DeltaDecompressor::new(successors_reader, header.successors_count as usize)
+                .collect::<Vec<_>>();
 
         let doc_iter = successors_iter
+            .into_iter()
             .map(move |i| {
                 (
                     i / header.unique_successors_count,
@@ -178,7 +175,7 @@ where
                 }
             });
 
-        Box::new(DocIDMapper::new(unique_docs_iter, doc_iter))
+        Box::new(DocIDMapper::new(unique_docs_iter.into_iter(), doc_iter))
     }
 }
 
@@ -226,6 +223,7 @@ impl StreamWriter for IndexHeader {
 
 #[derive(Debug, Clone, Default)]
 pub struct PostingHeader {
+    pub trigram: Trigram,
     pub unique_successors_count: u32,
     pub unique_successors_bytes: u32,
     pub successors_count: u32,
@@ -235,10 +233,13 @@ pub struct PostingHeader {
 }
 
 impl PostingHeader {
-    const SIZE_BYTES: usize = std::mem::size_of::<Self>();
+    const SIZE_BYTES: usize = 3 + 4 * 6;
 
     fn read_from<R: Read>(r: &mut R) -> Result<Self> {
+        let mut buf = [0u8; 3];
+        r.read_exact(&mut buf[..])?;
         Ok(Self {
+            trigram: Trigram(buf),
             unique_successors_count: r.read_u32::<LittleEndian>()?,
             unique_successors_bytes: r.read_u32::<LittleEndian>()?,
             successors_count: r.read_u32::<LittleEndian>()?,
@@ -255,9 +256,7 @@ impl PostingHeader {
 
     fn successors_section(&self) -> SuccessorsSection {
         Section::new(
-            Self::SIZE_BYTES as u64
-                + self.unique_successors_bytes as u64
-                + self.unique_docs_bytes as u64,
+            Self::SIZE_BYTES as u64 + self.unique_successors_bytes as u64,
             self.successors_bytes as u64,
         )
     }
@@ -266,21 +265,22 @@ impl PostingHeader {
         Section::new(
             Self::SIZE_BYTES as u64
                 + self.unique_successors_bytes as u64
-                + self.unique_docs_bytes as u64,
-            self.successors_bytes as u64,
+                + self.successors_bytes as u64,
+            self.unique_docs_bytes as u64,
         )
     }
 }
 
 impl StreamWriter for PostingHeader {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+        w.write_all(&<[u8; 3]>::from(self.trigram))?;
         w.write_u32::<LittleEndian>(self.unique_successors_count)?;
         w.write_u32::<LittleEndian>(self.unique_successors_bytes)?;
         w.write_u32::<LittleEndian>(self.successors_count)?;
         w.write_u32::<LittleEndian>(self.successors_bytes)?;
         w.write_u32::<LittleEndian>(self.unique_docs_count)?;
         w.write_u32::<LittleEndian>(self.unique_docs_bytes)?;
-        Ok(6 * std::mem::size_of::<u32>())
+        Ok(6 * std::mem::size_of::<u32>() + 3)
     }
 }
 

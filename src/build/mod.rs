@@ -191,6 +191,7 @@ impl IndexBuilder {
     fn build_posting<W: Write>(
         &mut self,
         w: &mut W,
+        trigram: Trigram,
         docs: &[(DocID, FxHashSet<Trigram>)],
     ) -> Result<TrigramPostingStats> {
         let mut buf = Vec::new();
@@ -201,6 +202,7 @@ impl IndexBuilder {
         let unique_docs_stats = self.build_unique_docs(&mut buf, &docs)?;
 
         let header = PostingHeader {
+            trigram,
             unique_successors_count: unique_successors_stats.count.try_into()?,
             unique_successors_bytes: unique_successors_stats.bytes.try_into()?,
             successors_count: successors_stats.count.try_into()?,
@@ -234,13 +236,12 @@ impl IndexBuilder {
         let mut postings_len: u64 = 0;
 
         for (trigram, docs) in std::mem::take(&mut self.combined).into_iter() {
-            let posting_stats = self.build_posting(w, &docs)?;
+            let posting_stats = self.build_posting(w, trigram, &docs)?;
             build_stats.add_posting(&posting_stats);
             postings_len += posting_stats.total_bytes() as u64;
             posting_ends.push((trigram, postings_len));
         }
 
-        // TODO compress this into blocks, btree style
         let mut unique_trigrams_len = 0;
         for (trigram, _) in posting_ends.iter() {
             unique_trigrams_len += w.write(&<[u8; 3]>::from(*trigram))?;

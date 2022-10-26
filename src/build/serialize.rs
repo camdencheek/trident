@@ -87,7 +87,7 @@ impl<R: Read> Iterator for U32Decompressor<R> {
 }
 
 impl<R: Read> U32Decompressor<R> {
-    pub fn new(mut r: R, count: usize) -> Self {
+    pub fn new(r: R, count: usize) -> Self {
         Self {
             remaining: count,
             r,
@@ -144,7 +144,7 @@ impl<R: Read> Iterator for U32DeltaDecompressor<R> {
 }
 
 impl<R: Read> U32DeltaDecompressor<R> {
-    pub fn new(mut r: R, count: usize) -> Self {
+    pub fn new(r: R, count: usize) -> Self {
         Self {
             remaining: count,
             r,
