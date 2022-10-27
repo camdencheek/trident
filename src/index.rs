@@ -91,21 +91,21 @@ where
 
         let absolute_section = self.header.trigram_postings.narrow(section);
         let mut reader = reader_at(&self.r, absolute_section.offset);
-        let header = PostingHeader::read_from(&mut reader).unwrap();
+        let posting_header = PostingHeader::read_from(&mut reader).unwrap();
 
         let tp = self.header.trigram_postings;
 
         let unique_successors_section =
-            tp.narrow(section.narrow(header.unique_successors_section()));
-        let successors_section = tp.narrow(section.narrow(header.successors_section()));
-        let unique_docs_section = tp.narrow(section.narrow(header.unique_docs_section()));
+            tp.narrow(section.narrow(posting_header.unique_successors_section()));
+        let successors_section = tp.narrow(section.narrow(posting_header.successors_section()));
+        let unique_docs_section = tp.narrow(section.narrow(posting_header.unique_docs_section()));
 
         // TODO: clean up this garbage
         let target_successor_id = TrigramID::from(*successor);
         let unique_successors_reader = reader_at(&self.r, unique_successors_section.offset);
         let target_local_successor_id = match U32DeltaDecompressor::new(
             unique_successors_reader,
-            header.unique_successors_count as usize,
+            posting_header.unique_successors_count as usize,
         )
         .enumerate()
         .find_map(|(local_id, successor_id)| {
@@ -120,23 +120,25 @@ where
         };
 
         let unique_docs_reader = reader_at(&self.r, unique_docs_section.offset);
-        let unique_docs_iter =
-            U32DeltaDecompressor::new(unique_docs_reader, header.unique_docs_count as usize)
-                .enumerate()
-                .map(|(i, d)| (i as u32, d))
-                .collect::<Vec<_>>(); // TODO: get rid of this
+        let unique_docs_iter = U32DeltaDecompressor::new(
+            unique_docs_reader,
+            posting_header.unique_docs_count as usize,
+        )
+        .enumerate()
+        .map(|(i, d)| (i as u32, d))
+        .collect::<Vec<_>>(); // TODO: get rid of this
 
         let successors_reader = reader_at(&self.r, successors_section.offset);
         let successors_iter =
-            U32DeltaDecompressor::new(successors_reader, header.successors_count as usize)
+            U32DeltaDecompressor::new(successors_reader, posting_header.successors_count as usize)
                 .collect::<Vec<_>>();
 
         let doc_iter = successors_iter
             .into_iter()
             .map(move |i| {
                 (
-                    i / header.unique_successors_count,
-                    i % header.unique_successors_count,
+                    i / posting_header.unique_successors_count,
+                    i % posting_header.unique_successors_count,
                 )
             })
             .filter_map(move |(local_doc_id, local_successor_id)| {
