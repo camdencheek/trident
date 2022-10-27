@@ -89,9 +89,11 @@ where
             None => return Box::new(std::iter::empty()),
         };
 
-        let absolute_section = self.header.trigram_postings.narrow(section);
-        let mut reader = reader_at(&self.r, absolute_section.offset);
-        let posting_header = PostingHeader::read_from(&mut reader).unwrap();
+        let posting_header = {
+            let absolute_section = self.header.trigram_postings.narrow(section);
+            let mut reader = reader_at(&self.r, absolute_section.offset);
+            PostingHeader::read_from(&mut reader).unwrap()
+        };
 
         let tp = self.header.trigram_postings;
 
