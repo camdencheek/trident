@@ -1,3 +1,4 @@
+use std::io::BufReader;
 use std::os::unix::fs::FileExt;
 use std::{
     io::{Read, Seek, SeekFrom, Write},
@@ -38,7 +39,7 @@ where
         let mut unique_trigrams_reader = {
             let mut r = r.clone();
             r.seek(SeekFrom::Start(header.unique_trigrams.offset))?;
-            r
+            BufReader::new(r)
         };
         for _ in 0..n_trigrams {
             let mut buf = [0u8; 3];
@@ -52,7 +53,7 @@ where
         let mut trigram_ends_reader = {
             let mut r = r.clone();
             r.seek(SeekFrom::Start(header.trigram_posting_ends.offset))?;
-            r
+            BufReader::new(r)
         };
         for _ in 0..n_trigrams {
             trigram_posting_ends.push(trigram_ends_reader.read_u64::<LittleEndian>()?);
@@ -104,7 +105,7 @@ where
         let mut reader = {
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(absolute_section.offset)).unwrap();
-            r
+            BufReader::new(r)
         };
         let header = PostingHeader::read_from(&mut reader).unwrap();
 
@@ -121,7 +122,7 @@ where
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(unique_successors_section.offset))
                 .unwrap();
-            r
+            BufReader::new(r)
         };
         let target_local_successor_id = match U32DeltaDecompressor::new(
             unique_successors_reader,
@@ -142,7 +143,7 @@ where
         let unique_docs_reader = {
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(unique_docs_section.offset)).unwrap();
-            r
+            BufReader::new(r)
         };
         let unique_docs_iter =
             U32DeltaDecompressor::new(unique_docs_reader, header.unique_docs_count as usize)
@@ -153,7 +154,7 @@ where
         let successors_reader = {
             let mut r = self.r.clone();
             r.seek(SeekFrom::Start(successors_section.offset)).unwrap();
-            r
+            BufReader::new(r)
         };
         let successors_iter =
             U32DeltaDecompressor::new(successors_reader, header.successors_count as usize)
