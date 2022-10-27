@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use trident::build::stats::IndexStats;
 use trident::build::IndexBuilder;
 use trident::index::Index;
-use trident::ioutil::FileCursor;
+use trident::ioutil::Cursor;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
@@ -115,7 +115,7 @@ fn summarize_stats(stats: IndexStats) {
 
 fn search(args: SearchArgs) -> Result<()> {
     let index_file = File::open(args.index_path)?;
-    let index = Index::new(FileCursor::new(index_file))?;
+    let index = Index::new(index_file)?;
     assert!(args.query.len() == 6);
     let mut trigram = [0u8; 3];
     trigram.copy_from_slice(args.query[0..3].as_bytes());

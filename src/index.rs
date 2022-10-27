@@ -1,18 +1,14 @@
 use std::io::BufReader;
-use std::os::unix::fs::FileExt;
-use std::{
-    io::{Read, Seek, SeekFrom, Write},
-    marker::PhantomData,
-};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 use anyhow::Result;
-use bitpacking::{BitPacker, BitPacker4x};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
-use super::ioutil::{Section, SectionType};
-use crate::build::serialize::{U32Decompressor, U32DeltaDecompressor};
+use super::ioutil::Section;
+use crate::build::serialize::U32DeltaDecompressor;
+use crate::ioutil::{Cursor, Len, ReadAt};
 use crate::TrigramID;
-use crate::{build::serialize::StreamWriter, DocID, LocalDocID, LocalSuccessorID, Trigram};
+use crate::{build::serialize::StreamWriter, DocID, LocalDocID, Trigram};
 
 pub trait ReadSeek: Read + Seek {}
 
@@ -28,33 +24,25 @@ pub struct Index<R> {
 
 impl<R> Index<R>
 where
-    R: Read + Seek + Clone,
+    R: ReadAt + Len,
 {
-    pub fn new(mut r: R) -> Result<Self> {
-        let header = Self::read_header(&mut r)?;
+    pub fn new(r: R) -> Result<Self> {
+        let header = Self::read_header(&r)?;
 
         assert!(header.unique_trigrams.len % 3 == 0);
         let n_trigrams = header.unique_trigrams.len as usize / 3;
         let mut unique_trigrams = Vec::with_capacity(n_trigrams);
-        let mut unique_trigrams_reader = {
-            let mut r = r.clone();
-            r.seek(SeekFrom::Start(header.unique_trigrams.offset))?;
-            BufReader::new(r)
-        };
+        let mut unique_trigrams_reader = reader_at(&r, header.unique_trigrams.offset);
         for _ in 0..n_trigrams {
             let mut buf = [0u8; 3];
             unique_trigrams_reader.read_exact(&mut buf)?;
-            unique_trigrams.push(Trigram(buf))
+            unique_trigrams.push(Trigram(buf));
         }
 
         assert!(header.trigram_posting_ends.len % 4 == 0);
         assert!(header.trigram_posting_ends.len as usize / 4 == n_trigrams);
         let mut trigram_posting_ends = Vec::with_capacity(n_trigrams);
-        let mut trigram_ends_reader = {
-            let mut r = r.clone();
-            r.seek(SeekFrom::Start(header.trigram_posting_ends.offset))?;
-            BufReader::new(r)
-        };
+        let mut trigram_ends_reader = reader_at(&r, header.trigram_posting_ends.offset);
         for _ in 0..n_trigrams {
             trigram_posting_ends.push(trigram_ends_reader.read_u64::<LittleEndian>()?);
         }
@@ -67,10 +55,10 @@ where
         })
     }
 
-    // TODO move this to an IndexHeader method
-    fn read_header(r: &mut R) -> Result<IndexHeader> {
-        r.seek(SeekFrom::End(-(IndexHeader::SIZE_BYTES as i64)))?;
-        IndexHeader::read_from(r)
+    fn read_header<T: ReadAt + Len>(r: &T) -> Result<IndexHeader> {
+        let mut cursor = Cursor::new(r);
+        cursor.seek(SeekFrom::End(-(IndexHeader::SIZE_BYTES as i64)))?;
+        IndexHeader::read_from(&mut cursor)
     }
 
     fn trigram_section(&self, t: Trigram) -> Option<TrigramPostingSection> {
@@ -102,11 +90,7 @@ where
         };
 
         let absolute_section = self.header.trigram_postings.narrow(section);
-        let mut reader = {
-            let mut r = self.r.clone();
-            r.seek(SeekFrom::Start(absolute_section.offset)).unwrap();
-            BufReader::new(r)
-        };
+        let mut reader = reader_at(&self.r, absolute_section.offset);
         let header = PostingHeader::read_from(&mut reader).unwrap();
 
         let tp = self.header.trigram_postings;
@@ -118,12 +102,7 @@ where
 
         // TODO: clean up this garbage
         let target_successor_id = TrigramID::from(*successor);
-        let unique_successors_reader = {
-            let mut r = self.r.clone();
-            r.seek(SeekFrom::Start(unique_successors_section.offset))
-                .unwrap();
-            BufReader::new(r)
-        };
+        let unique_successors_reader = reader_at(&self.r, unique_successors_section.offset);
         let target_local_successor_id = match U32DeltaDecompressor::new(
             unique_successors_reader,
             header.unique_successors_count as usize,
@@ -140,22 +119,14 @@ where
             None => return Box::new(std::iter::empty()),
         };
 
-        let unique_docs_reader = {
-            let mut r = self.r.clone();
-            r.seek(SeekFrom::Start(unique_docs_section.offset)).unwrap();
-            BufReader::new(r)
-        };
+        let unique_docs_reader = reader_at(&self.r, unique_docs_section.offset);
         let unique_docs_iter =
             U32DeltaDecompressor::new(unique_docs_reader, header.unique_docs_count as usize)
                 .enumerate()
                 .map(|(i, d)| (i as u32, d))
                 .collect::<Vec<_>>(); // TODO: get rid of this
 
-        let successors_reader = {
-            let mut r = self.r.clone();
-            r.seek(SeekFrom::Start(successors_section.offset)).unwrap();
-            BufReader::new(r)
-        };
+        let successors_reader = reader_at(&self.r, successors_section.offset);
         let successors_iter =
             U32DeltaDecompressor::new(successors_reader, header.successors_count as usize)
                 .collect::<Vec<_>>();
@@ -329,4 +300,9 @@ where
         }
         None
     }
+}
+
+fn reader_at<R: ReadAt>(r: &R, offset: u64) -> BufReader<Cursor<&R>> {
+    let cursor = Cursor::new_at(r, offset);
+    BufReader::new(cursor)
 }

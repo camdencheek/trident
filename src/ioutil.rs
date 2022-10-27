@@ -1,66 +1,77 @@
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::os::unix::fs::FileExt;
-use std::sync::Arc;
 
 use crate::build::serialize::StreamWriter;
 
-#[derive(Clone)]
-pub struct FileCursor {
-    f: Arc<File>,
-    offset: u64,
+pub trait ReadAt {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
+    // TODO add an optional read_exact_at
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()>;
 }
 
-impl FileCursor {
-    pub fn new(f: File) -> Self {
-        Self {
-            f: Arc::new(f),
-            offset: 0,
-        }
+impl<F: FileExt> ReadAt for F {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        self.read_at(buf, offset)
+    }
+
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        self.read_exact_at(buf, offset)
     }
 }
 
-impl Read for FileCursor {
+pub trait Len {
+    fn len(&self) -> io::Result<u64>;
+}
+
+impl Len for File {
+    fn len(&self) -> io::Result<u64> {
+        self.metadata().map(|m| m.len())
+    }
+}
+
+#[derive(Clone)]
+pub struct Cursor<T> {
+    r: T,
+    offset: u64,
+}
+
+impl<T> Cursor<T> {
+    pub fn new(r: T) -> Self {
+        Self { r, offset: 0 }
+    }
+
+    pub fn new_at(r: T, offset: u64) -> Self {
+        Self { r, offset }
+    }
+}
+
+impl<T> Read for Cursor<&T>
+where
+    T: ReadAt,
+{
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.f.read_at(buf, self.offset)?;
+        let n = self.r.read_at(buf, self.offset)?;
         self.offset += n as u64;
         Ok(n)
     }
 
     fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
-        self.f.read_exact_at(buf, self.offset)?;
+        self.r.read_exact_at(buf, self.offset)?;
         self.offset += buf.len() as u64;
         Ok(())
     }
 }
 
-// impl Write for FileCursor {
-//     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-//         let n = self.f.write_at(buf, self.offset)?;
-//         self.offset += n as u64;
-//         Ok(n)
-//     }
-
-//     fn write_all(&mut self, buf: &[u8]) -> Result<()> {
-//         self.f.write_all_at(buf, self.offset)?;
-//         self.offset += buf.len() as u64;
-//         Ok(())
-//     }
-
-//     fn flush(&mut self) -> Result<()> {
-//         self.f.flush()
-//     }
-// }
-
-impl Seek for FileCursor {
+impl<T: Len> Seek for Cursor<&T> {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         match pos {
             SeekFrom::Current(i) => self.offset = (self.offset as i64 + i) as u64,
             SeekFrom::Start(i) => self.offset = i,
-            SeekFrom::End(i) => self.offset = (self.f.metadata()?.len() as i64 + i) as u64,
+            SeekFrom::End(i) => self.offset = (self.r.len()? as i64 + i) as u64,
         };
         Ok(self.offset)
     }
