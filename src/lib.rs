@@ -9,6 +9,7 @@ pub mod index;
 pub mod ioutil;
 
 type TrigramID = u32;
+#[allow(unused)]
 type LocalSuccessorID = u32;
 type DocID = u32;
 type LocalDocID = u32;

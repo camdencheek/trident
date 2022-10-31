@@ -1,4 +1,4 @@
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufWriter, Read};
 use std::{fs::File, path::PathBuf};
 
 use anyhow::Result;
@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use trident::build::stats::IndexStats;
 use trident::build::IndexBuilder;
 use trident::index::Index;
-use trident::ioutil::Cursor;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]

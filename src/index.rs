@@ -61,14 +61,14 @@ where
         IndexHeader::read_from(&mut cursor)
     }
 
+    // Returns the posting section for the given trigram, if it exists.
     fn trigram_section(&self, t: Trigram) -> Option<TrigramPostingSection> {
         let trigram_idx = match self.unique_trigrams.binary_search(&t) {
             Ok(idx) => idx,
+            // An Err variant means the trigram doesn't exist.
             Err(_) => return None,
         };
 
-        // The first posting has an implicit start of zero, otherwise
-        // it starts at the end of the previous posting.
         let start = match trigram_idx {
             0 => 0,
             _ => self.trigram_posting_ends[trigram_idx - 1],
@@ -105,18 +105,21 @@ where
         // TODO: clean up this garbage
         let target_successor_id = TrigramID::from(*successor);
         let unique_successors_reader = reader_at(&self.r, unique_successors_section.offset);
-        let target_local_successor_id = match U32DeltaDecompressor::new(
+        let matrix_iter = U32DeltaDecompressor::new(
             unique_successors_reader,
             posting_header.unique_successors_count as usize,
-        )
-        .enumerate()
-        .find_map(|(local_id, successor_id)| {
-            if successor_id == target_successor_id {
-                Some(local_id)
-            } else {
-                None
-            }
-        }) {
+        );
+        let first_non_none = matrix_iter
+            .enumerate()
+            .find_map(|(local_id, successor_id)| {
+                if successor_id == target_successor_id {
+                    Some(local_id)
+                } else {
+                    None
+                }
+            });
+
+        let target_local_successor_id = match first_non_none {
             Some(l) => l as u32,
             None => return Box::new(std::iter::empty()),
         };
@@ -128,7 +131,7 @@ where
         )
         .enumerate()
         .map(|(i, d)| (i as u32, d))
-        .collect::<Vec<_>>(); // TODO: get rid of this
+        .collect::<Vec<_>>();
 
         let successors_reader = reader_at(&self.r, successors_section.offset);
         let successors_iter =
@@ -309,4 +312,27 @@ where
 fn reader_at<R: ReadAt>(r: &R, offset: u64) -> BufReader<Cursor<&R>> {
     let cursor = Cursor::new_at(r, offset);
     BufReader::new(cursor)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{build::IndexBuilder, ioutil::Mem};
+
+    #[test]
+    fn test_search() {
+        let mut builder = IndexBuilder::new();
+        builder.add_doc(b"test string 1").unwrap();
+        builder.add_doc(b"test string 2").unwrap();
+        builder.add_doc(b"abracadabra").unwrap();
+
+        let mut output = Vec::new();
+        builder.build(&mut output).unwrap();
+
+        let index = Index::new(Mem(output)).unwrap();
+        let doc_ids = index
+            .search(&Trigram(*b"str"), &Trigram(*b"ing"))
+            .collect::<Vec<DocID>>();
+        assert!(&doc_ids == &[0, 1]);
+    }
 }

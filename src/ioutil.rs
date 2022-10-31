@@ -1,5 +1,5 @@
 use anyhow::Result;
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, WriteBytesExt};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
@@ -30,6 +30,34 @@ pub trait Len {
 impl Len for File {
     fn len(&self) -> io::Result<u64> {
         self.metadata().map(|m| m.len())
+    }
+}
+
+pub struct Mem(pub Vec<u8>);
+
+impl ReadAt for Mem {
+    fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        let sz = buf.len().min(self.0.len() - offset as usize);
+        buf[..sz].copy_from_slice(&self.0[offset as usize..offset as usize + sz]);
+        Ok(sz)
+    }
+
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        let sz = buf.len().min(self.0.len() - offset as usize);
+        if sz != buf.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "could not fill buffer",
+            ));
+        }
+        buf[..sz].copy_from_slice(&self.0[offset as usize..offset as usize + sz]);
+        Ok(())
+    }
+}
+
+impl Len for Mem {
+    fn len(&self) -> io::Result<u64> {
+        Ok(self.0.len() as u64)
     }
 }
 
