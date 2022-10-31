@@ -92,8 +92,9 @@ where
         }
 
         let (&leading_trigram, rest) = query.split_array_ref::<3>();
+        let leading_trigram = Trigram(leading_trigram);
 
-        let trigram_section = match self.trigram_section(Trigram(leading_trigram)) {
+        let trigram_section = match self.trigram_section(leading_trigram) {
             Some(s) => s,
             // If the trigram doesn't exist, return early with an empty iterator
             None => return Box::new(std::iter::empty()),
