@@ -1,4 +1,5 @@
-use std::io::{BufWriter, Read};
+use std::io::{BufWriter, Read, Write};
+use std::time::Instant;
 use std::{fs::File, path::PathBuf};
 
 use anyhow::Result;
@@ -115,13 +116,11 @@ fn summarize_stats(stats: IndexStats) {
 fn search(args: SearchArgs) -> Result<()> {
     let index_file = File::open(args.index_path)?;
     let index = Index::new(index_file)?;
-    assert!(args.query.len() == 6);
-    let mut trigram = [0u8; 3];
-    trigram.copy_from_slice(args.query[0..3].as_bytes());
-    let mut successor = [0u8; 3];
-    successor.copy_from_slice(args.query[3..].as_bytes());
-    for doc in index.search(&trigram.into(), &successor.into()) {
-        println!("{}", doc);
+    for i in 0..1000 {
+        let opened = Instant::now();
+        let found = index.search(args.query.as_bytes()).count();
+        println!("{} results in {:0.2?}\n", found, opened.elapsed());
     }
+
     Ok(())
 }

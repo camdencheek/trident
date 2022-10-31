@@ -105,57 +105,67 @@ where
         let successors_section = tp.narrow(trigram_section.narrow(posting_header.matrix_section()));
         let unique_docs_section = tp.narrow(trigram_section.narrow(posting_header.docs_section()));
 
-        // TODO: clean up this garbage
-        let target_successor_id = TrigramID::from(*successor);
-        let unique_successors_reader = reader_at(&self.r, unique_successors_section.offset);
-        let matrix_iter = U32DeltaDecompressor::new(
-            unique_successors_reader,
-            posting_header.successors_count as usize,
-        );
-        let first_non_none = matrix_iter
-            .enumerate()
-            .find_map(|(local_id, successor_id)| {
-                if successor_id == target_successor_id {
-                    Some(local_id)
-                } else {
-                    None
-                }
-            });
-
-        let target_local_successor_id = match first_non_none {
-            Some(l) => l as u32,
-            None => return Box::new(std::iter::empty()),
-        };
-
-        let unique_docs_reader = reader_at(&self.r, unique_docs_section.offset);
-        let unique_docs_iter =
-            U32DeltaDecompressor::new(unique_docs_reader, posting_header.docs_count as usize)
+        if rest.len() == 3 {
+            let mut successor = [0u8; 3];
+            successor.copy_from_slice(rest);
+            // TODO: clean up this garbage
+            let target_successor_id = TrigramID::from(Trigram(successor));
+            let unique_successors_reader = reader_at(&self.r, unique_successors_section.offset);
+            let matrix_iter = U32DeltaDecompressor::new(
+                unique_successors_reader,
+                posting_header.successors_count as usize,
+            );
+            let first_non_none = matrix_iter
                 .enumerate()
-                .map(|(i, d)| (i as u32, d))
-                .collect::<Vec<_>>();
+                .find_map(|(local_id, successor_id)| {
+                    if successor_id == target_successor_id {
+                        Some(local_id)
+                    } else {
+                        None
+                    }
+                });
 
-        let successors_reader = reader_at(&self.r, successors_section.offset);
-        let successors_iter =
-            U32DeltaDecompressor::new(successors_reader, posting_header.matrix_count as usize)
-                .collect::<Vec<_>>();
+            let target_local_successor_id = match first_non_none {
+                Some(l) => l as u32,
+                None => return Box::new(std::iter::empty()),
+            };
 
-        let doc_iter = successors_iter
-            .into_iter()
-            .map(move |i| {
-                (
-                    i / posting_header.successors_count,
-                    i % posting_header.successors_count,
-                )
-            })
-            .filter_map(move |(local_doc_id, local_successor_id)| {
-                if local_successor_id == target_local_successor_id {
-                    Some(local_doc_id)
-                } else {
-                    None
-                }
-            });
+            let unique_docs_reader = reader_at(&self.r, unique_docs_section.offset);
+            let unique_docs_iter =
+                U32DeltaDecompressor::new(unique_docs_reader, posting_header.docs_count as usize)
+                    .enumerate()
+                    .map(|(i, d)| (i as u32, d));
 
-        Box::new(DocIDMapper::new(unique_docs_iter.into_iter(), doc_iter))
+            let successors_reader = reader_at(&self.r, successors_section.offset);
+            let successors_iter =
+                U32DeltaDecompressor::new(successors_reader, posting_header.matrix_count as usize);
+
+            let doc_iter = successors_iter
+                .into_iter()
+                .map(move |i| {
+                    (
+                        i / posting_header.successors_count,
+                        i % posting_header.successors_count,
+                    )
+                })
+                .filter_map(move |(local_doc_id, local_successor_id)| {
+                    if local_successor_id == target_local_successor_id {
+                        Some(local_doc_id)
+                    } else {
+                        None
+                    }
+                });
+
+            Box::new(DocIDMapper::new(unique_docs_iter.into_iter(), doc_iter))
+        } else if rest.len() == 0 {
+            let unique_docs_reader = reader_at(&self.r, unique_docs_section.offset);
+            Box::new(U32DeltaDecompressor::new(
+                unique_docs_reader,
+                posting_header.docs_count as usize,
+            ))
+        } else {
+            todo!("implement 4-grams and 5-grams")
+        }
     }
 }
 
