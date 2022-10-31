@@ -151,7 +151,7 @@ impl IndexBuilder {
         docs: &[(DocID, FxHashSet<Trigram>)],
     ) -> Result<SequenceStats> {
         self.buf_u32.clear();
-        for (local_doc_id, (_, successors)) in docs.iter().enumerate() {
+        for (local_doc_id, (doc_id, successors)) in docs.iter().enumerate() {
             let offset = local_doc_id * unique_successors.len();
             self.buf_u32.extend(
                 successors
@@ -255,6 +255,7 @@ impl IndexBuilder {
         }
 
         let header = IndexHeader {
+            num_docs: self.num_docs as u32,
             trigram_postings: Section::new(0, postings_len),
             unique_trigrams: Section::new(postings_len, unique_trigrams_len as u64),
             trigram_posting_ends: Section::new(

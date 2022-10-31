@@ -1,7 +1,7 @@
 use std::io::BufReader;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use super::ioutil::Section;
@@ -27,7 +27,7 @@ where
     R: ReadAt + Len,
 {
     pub fn new(r: R) -> Result<Self> {
-        let header = Self::read_header(&r)?;
+        let header = Self::read_header(&r).context("read header")?;
 
         assert!(header.unique_trigrams.len % 3 == 0);
         let n_trigrams = header.unique_trigrams.len as usize / 3;
@@ -57,7 +57,9 @@ where
 
     fn read_header<T: ReadAt + Len>(r: &T) -> Result<IndexHeader> {
         let mut cursor = Cursor::new(r);
-        cursor.seek(SeekFrom::End(-(IndexHeader::SIZE_BYTES as i64)))?;
+        cursor
+            .seek(SeekFrom::End(-(IndexHeader::SIZE_BYTES as i64)))
+            .context("seek")?;
         IndexHeader::read_from(&mut cursor)
     }
 
@@ -160,16 +162,19 @@ where
 
 #[derive(Debug, Clone)]
 pub struct IndexHeader {
+    pub num_docs: u32,
     pub trigram_postings: TrigramPostingsSection,
     pub unique_trigrams: UniqueTrigramsSection,
     pub trigram_posting_ends: TrigramPostingEndsSection,
 }
 
 impl IndexHeader {
-    const SIZE_BYTES: usize = 48;
+    // TODO: calculate this from member sizes
+    const SIZE_BYTES: usize = 52;
 
     fn read_from<R: Read>(r: &mut R) -> Result<Self> {
         let header = IndexHeader {
+            num_docs: r.read_u32::<LittleEndian>()?,
             trigram_postings: TrigramPostingsSection::new(
                 r.read_u64::<LittleEndian>()?,
                 r.read_u64::<LittleEndian>()?,
@@ -193,7 +198,9 @@ impl IndexHeader {
 
 impl StreamWriter for IndexHeader {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
-        let mut n = self.trigram_postings.write_to(w)?;
+        w.write_u32::<LittleEndian>(self.num_docs)?;
+        let mut n = 4;
+        n += self.trigram_postings.write_to(w)?;
         n += self.unique_trigrams.write_to(w)?;
         n += self.trigram_posting_ends.write_to(w)?;
         Ok(n)
