@@ -7,8 +7,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use super::ioutil::Section;
 use crate::build::serialize::U32DeltaDecompressor;
 use crate::ioutil::{Cursor, Len, ReadAt};
-use crate::TrigramID;
 use crate::{build::serialize::StreamWriter, DocID, LocalDocID, Trigram};
+use crate::{LocalSuccessorID, TrigramID};
 
 pub struct Index<R> {
     header: IndexHeader,
@@ -135,21 +135,38 @@ impl<'a, R: ReadAt + Len> PostingSearcher<'a, R> {
         }
     }
 
-    fn successors_section(&self) -> Section {
-        self.postings_section.narrow(
+    fn successors(&self) -> impl Iterator<Item = TrigramID> + 'a {
+        let section = self.postings_section.narrow(
             self.posting_section
                 .narrow(self.header.successors_section()),
+        );
+
+        U32DeltaDecompressor::new(
+            reader_in(self.r, section),
+            self.header.successors_count as usize,
         )
     }
 
-    fn matrix_section(&self) -> Section {
-        self.postings_section
-            .narrow(self.posting_section.narrow(self.header.matrix_section()))
+    fn matrix(&self) -> impl Iterator<Item = (LocalDocID, LocalSuccessorID)> + 'a {
+        let section = self
+            .postings_section
+            .narrow(self.posting_section.narrow(self.header.matrix_section()));
+
+        let raw = U32DeltaDecompressor::new(
+            reader_in(self.r, section),
+            self.header.matrix_count as usize,
+        );
+
+        let columns = self.header.successors_count;
+        raw.map(move |i| (i / columns, i % columns))
     }
 
-    fn docs_section(&self) -> Section {
-        self.postings_section
-            .narrow(self.posting_section.narrow(self.header.docs_section()))
+    fn docs(&self) -> impl Iterator<Item = DocID> + 'a {
+        let section = self
+            .postings_section
+            .narrow(self.posting_section.narrow(self.header.docs_section()));
+
+        U32DeltaDecompressor::new(reader_in(self.r, section), self.header.docs_count as usize)
     }
 
     fn search(self, remainder: &[u8]) -> Box<dyn Iterator<Item = DocID> + 'a> {
@@ -158,44 +175,24 @@ impl<'a, R: ReadAt + Len> PostingSearcher<'a, R> {
             successor.copy_from_slice(remainder);
             // TODO: clean up this garbage
             let target_successor_id = TrigramID::from(Trigram(successor));
-            let unique_successors_reader = reader_in(self.r, self.successors_section());
-            let matrix_iter = U32DeltaDecompressor::new(
-                unique_successors_reader,
-                self.header.successors_count as usize,
-            );
-            let first_non_none = matrix_iter
-                .enumerate()
-                .find_map(|(local_id, successor_id)| {
-                    if successor_id == target_successor_id {
-                        Some(local_id)
-                    } else {
-                        None
-                    }
-                });
+            let first_non_none =
+                self.successors()
+                    .enumerate()
+                    .find_map(|(local_id, successor_id)| {
+                        if successor_id == target_successor_id {
+                            Some(local_id)
+                        } else {
+                            None
+                        }
+                    });
 
             let target_local_successor_id = match first_non_none {
                 Some(l) => l as u32,
                 None => return Box::new(std::iter::empty()),
             };
 
-            let unique_docs_reader = reader_in(self.r, self.docs_section());
-            let unique_docs_iter =
-                U32DeltaDecompressor::new(unique_docs_reader, self.header.docs_count as usize)
-                    .enumerate()
-                    .map(|(i, d)| (i as u32, d));
-
-            let successors_reader = reader_in(self.r, self.matrix_section());
-            let successors_iter =
-                U32DeltaDecompressor::new(successors_reader, self.header.matrix_count as usize);
-
-            let doc_iter = successors_iter
-                .into_iter()
-                .map(move |i| {
-                    (
-                        i / self.header.successors_count,
-                        i % self.header.successors_count,
-                    )
-                })
+            let doc_iter = self
+                .matrix()
                 .filter_map(move |(local_doc_id, local_successor_id)| {
                     if local_successor_id == target_local_successor_id {
                         Some(local_doc_id)
@@ -204,13 +201,12 @@ impl<'a, R: ReadAt + Len> PostingSearcher<'a, R> {
                     }
                 });
 
-            Box::new(DocIDMapper::new(unique_docs_iter.into_iter(), doc_iter))
-        } else if remainder.len() == 0 {
-            let unique_docs_reader = reader_in(self.r, self.docs_section());
-            Box::new(U32DeltaDecompressor::new(
-                unique_docs_reader,
-                self.header.docs_count as usize,
+            Box::new(DocIDMapper::new(
+                self.docs().enumerate().map(|(i, j)| (i as u32, j)),
+                doc_iter,
             ))
+        } else if remainder.len() == 0 {
+            Box::new(self.docs())
         } else {
             todo!("implement 4-grams and 5-grams")
         }
