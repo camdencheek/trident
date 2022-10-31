@@ -78,6 +78,12 @@ where
         Some(Section::new(start, end - start))
     }
 
+    // An estimate of the relative frequency of a trigram
+    fn frequency(&self, t: Trigram) -> f32 {
+        self.trigram_section(t).map(|s| s.len).unwrap_or(0) as f32
+            / self.header.trigram_postings.len as f32
+    }
+
     pub fn search<'a>(&'a self, query: &[u8]) -> Box<dyn Iterator<Item = DocID> + 'a> {
         if query.len() < 3 {
             // For now, just return an iterator over all docs if we don't have a searchable
@@ -87,9 +93,9 @@ where
 
         let (&leading_trigram, rest) = query.split_array_ref::<3>();
 
-        // If the trigram doesn't exist, return early with an empty iterator
         let trigram_section = match self.trigram_section(Trigram(leading_trigram)) {
             Some(s) => s,
+            // If the trigram doesn't exist, return early with an empty iterator
             None => return Box::new(std::iter::empty()),
         };
 
