@@ -72,8 +72,11 @@ impl<T> Cursor<T> {
         Self { r, offset: 0 }
     }
 
-    pub fn new_at(r: T, offset: u64) -> Self {
-        Self { r, offset }
+    pub fn new_in(r: T, section: Section) -> Self {
+        Self {
+            r,
+            offset: section.offset,
+        }
     }
 }
 

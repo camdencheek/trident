@@ -32,7 +32,7 @@ where
         assert!(header.unique_trigrams.len % 3 == 0);
         let n_trigrams = header.unique_trigrams.len as usize / 3;
         let mut unique_trigrams = Vec::with_capacity(n_trigrams);
-        let mut unique_trigrams_reader = reader_at(&r, header.unique_trigrams.offset);
+        let mut unique_trigrams_reader = reader_in(&r, header.unique_trigrams);
         for _ in 0..n_trigrams {
             let mut buf = [0u8; 3];
             unique_trigrams_reader.read_exact(&mut buf)?;
@@ -42,7 +42,7 @@ where
         assert!(header.trigram_posting_ends.len % 4 == 0);
         assert!(header.trigram_posting_ends.len as usize / 4 == n_trigrams);
         let mut trigram_posting_ends = Vec::with_capacity(n_trigrams);
-        let mut trigram_ends_reader = reader_at(&r, header.trigram_posting_ends.offset);
+        let mut trigram_ends_reader = reader_in(&r, header.trigram_posting_ends);
         for _ in 0..n_trigrams {
             trigram_posting_ends.push(trigram_ends_reader.read_u64::<LittleEndian>()?);
         }
@@ -101,7 +101,7 @@ where
 
         let posting_header = {
             let absolute_section = self.header.trigram_postings.narrow(trigram_section);
-            let mut reader = reader_at(&self.r, absolute_section.offset);
+            let mut reader = reader_in(&self.r, absolute_section);
             PostingHeader::read_from(&mut reader).unwrap()
         };
 
@@ -116,7 +116,7 @@ where
             successor.copy_from_slice(rest);
             // TODO: clean up this garbage
             let target_successor_id = TrigramID::from(Trigram(successor));
-            let unique_successors_reader = reader_at(&self.r, unique_successors_section.offset);
+            let unique_successors_reader = reader_in(&self.r, unique_successors_section);
             let matrix_iter = U32DeltaDecompressor::new(
                 unique_successors_reader,
                 posting_header.successors_count as usize,
@@ -136,13 +136,13 @@ where
                 None => return Box::new(std::iter::empty()),
             };
 
-            let unique_docs_reader = reader_at(&self.r, unique_docs_section.offset);
+            let unique_docs_reader = reader_in(&self.r, unique_docs_section);
             let unique_docs_iter =
                 U32DeltaDecompressor::new(unique_docs_reader, posting_header.docs_count as usize)
                     .enumerate()
                     .map(|(i, d)| (i as u32, d));
 
-            let successors_reader = reader_at(&self.r, successors_section.offset);
+            let successors_reader = reader_in(&self.r, successors_section);
             let successors_iter =
                 U32DeltaDecompressor::new(successors_reader, posting_header.matrix_count as usize);
 
@@ -164,7 +164,7 @@ where
 
             Box::new(DocIDMapper::new(unique_docs_iter.into_iter(), doc_iter))
         } else if rest.len() == 0 {
-            let unique_docs_reader = reader_at(&self.r, unique_docs_section.offset);
+            let unique_docs_reader = reader_in(&self.r, unique_docs_section);
             Box::new(U32DeltaDecompressor::new(
                 unique_docs_reader,
                 posting_header.docs_count as usize,
@@ -329,8 +329,8 @@ where
     }
 }
 
-fn reader_at<R: ReadAt>(r: &R, offset: u64) -> BufReader<Cursor<&R>> {
-    let cursor = Cursor::new_at(r, offset);
+fn reader_in<R: ReadAt>(r: &R, section: Section) -> BufReader<Cursor<&R>> {
+    let cursor = Cursor::new_in(r, section);
     BufReader::new(cursor)
 }
 
