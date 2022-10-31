@@ -204,12 +204,12 @@ impl IndexBuilder {
 
         let header = PostingHeader {
             trigram,
-            unique_successors_count: unique_successors_stats.count.try_into()?,
-            unique_successors_bytes: unique_successors_stats.bytes.try_into()?,
-            successors_count: successors_stats.count.try_into()?,
-            successors_bytes: successors_stats.bytes.try_into()?,
-            unique_docs_count: unique_docs_stats.count.try_into()?,
-            unique_docs_bytes: unique_docs_stats.bytes.try_into()?,
+            successors_count: unique_successors_stats.count.try_into()?,
+            successors_bytes: unique_successors_stats.bytes.try_into()?,
+            matrix_count: successors_stats.count.try_into()?,
+            matrix_bytes: successors_stats.bytes.try_into()?,
+            docs_count: unique_docs_stats.count.try_into()?,
+            docs_bytes: unique_docs_stats.bytes.try_into()?,
         };
 
         let header_bytes = header.write_to(w)?;
