@@ -57,6 +57,7 @@ fn index(args: IndexArgs) -> Result<()> {
         if let Err(e) = f.read_to_string(&mut buf) {
             println!("skipping {:?}: {}", doc.path(), e);
         };
+        buf.make_ascii_lowercase();
         builder.add_doc(buf.as_bytes())?;
     }
 
@@ -116,11 +117,9 @@ fn summarize_stats(stats: IndexStats) {
 fn search(args: SearchArgs) -> Result<()> {
     let index_file = File::open(args.index_path)?;
     let index = Index::new(index_file)?;
-    for i in 0..1000 {
-        let opened = Instant::now();
-        let found = index.search(args.query.as_bytes()).count();
-        println!("{} results in {:0.2?}\n", found, opened.elapsed());
-    }
+    let opened = Instant::now();
+    let found = index.candidates(args.query.as_bytes()).count();
+    println!("{} results in {:0.2?}\n", found, opened.elapsed());
 
     Ok(())
 }

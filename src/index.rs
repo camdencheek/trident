@@ -84,7 +84,8 @@ where
             / self.header.trigram_postings.len as f32
     }
 
-    pub fn search<'a>(&'a self, query: &[u8]) -> Box<dyn Iterator<Item = DocID> + 'a> {
+    // Returns an iterator over the candidate document IDs.
+    pub fn candidates<'a>(&'a self, query: &[u8]) -> Box<dyn Iterator<Item = DocID> + 'a> {
         if query.len() < 3 {
             // For now, just return an iterator over all docs if we don't have a searchable
             // trigram. This will force all docs to be brute-force searched.
@@ -439,19 +440,19 @@ mod test {
         builder.build(&mut output).unwrap();
 
         let index = Index::new(Mem(output)).unwrap();
-        let doc_ids = index.search(b"string").collect::<Vec<DocID>>();
+        let doc_ids = index.candidates(b"string").collect::<Vec<DocID>>();
         assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.search(b"strin").collect::<Vec<DocID>>();
+        let doc_ids = index.candidates(b"strin").collect::<Vec<DocID>>();
         assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.search(b"stri").collect::<Vec<DocID>>();
+        let doc_ids = index.candidates(b"stri").collect::<Vec<DocID>>();
         assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.search(b"str").collect::<Vec<DocID>>();
+        let doc_ids = index.candidates(b"str").collect::<Vec<DocID>>();
         assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.search(b"abr").collect::<Vec<DocID>>();
+        let doc_ids = index.candidates(b"abr").collect::<Vec<DocID>>();
         assert_eq!(&doc_ids, &[2]);
     }
 }
