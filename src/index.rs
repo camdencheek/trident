@@ -171,10 +171,7 @@ impl<'a, R: ReadAt + Len> PostingSearcher<'a, R> {
 
     fn search(self, remainder: &[u8]) -> Box<dyn Iterator<Item = DocID> + 'a> {
         if remainder.len() == 3 {
-            let mut successor = [0u8; 3];
-            successor.copy_from_slice(remainder);
-            // TODO: clean up this garbage
-            let target_successor_id = TrigramID::from(Trigram(successor));
+            let target_successor_id = TrigramID::from(Trigram::try_from(remainder).unwrap());
             let first_non_none =
                 self.successors()
                     .enumerate()

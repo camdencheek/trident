@@ -59,6 +59,21 @@ impl From<[u8; 3]> for Trigram {
     }
 }
 
+impl TryFrom<&[u8]> for Trigram {
+    type Error = anyhow::Error;
+
+    fn try_from(s: &[u8]) -> std::result::Result<Self, Self::Error> {
+        if s.len() < 3 {
+            return Err(anyhow::anyhow!(
+                "cannot create trigram from too-small slice"
+            ));
+        }
+        let mut successor = [0u8; 3];
+        successor.copy_from_slice(&s[..3]);
+        Ok(Trigram(successor))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
