@@ -1,14 +1,16 @@
+use std::cmp::Ordering;
 use std::io::BufReader;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use itertools::Itertools;
 
 use super::ioutil::Section;
 use crate::build::serialize::U32DeltaDecompressor;
 use crate::ioutil::{Cursor, Len, ReadAt};
-use crate::{build::serialize::StreamWriter, DocID, LocalDocID, Trigram};
-use crate::{LocalSuccessorID, TrigramID};
+use crate::{build::serialize::StreamWriter, DocID, LocalDocIdx, Trigram};
+use crate::{LocalSuccessorIdx, TrigramID};
 
 pub struct Index<R> {
     header: IndexHeader,
@@ -147,7 +149,7 @@ impl<'a, R: ReadAt + Len> PostingSearcher<'a, R> {
         )
     }
 
-    fn matrix(&self) -> impl Iterator<Item = (LocalDocID, LocalSuccessorID)> + 'a {
+    fn matrix(&self) -> impl Iterator<Item = (LocalDocIdx, LocalSuccessorIdx)> + 'a {
         let section = self
             .postings_section
             .narrow(self.posting_section.narrow(self.header.matrix_section()));
@@ -170,42 +172,94 @@ impl<'a, R: ReadAt + Len> PostingSearcher<'a, R> {
     }
 
     fn search(self, remainder: &[u8]) -> Box<dyn Iterator<Item = DocID> + 'a> {
-        if remainder.len() == 3 {
-            let target_successor_id = TrigramID::from(Trigram::try_from(remainder).unwrap());
-            let first_non_none =
-                self.successors()
-                    .enumerate()
-                    .find_map(|(local_id, successor_id)| {
-                        if successor_id == target_successor_id {
-                            Some(local_id)
+        match remainder.len() {
+            // In the case where we have no extra successor information, we can just return the
+            // list of unique doc IDs for the posting.
+            0 => Box::new(self.docs()),
+
+            // In the case where we do not have a full successor trigram, we find the range of
+            // unique successor trigrams that share a prefix, then use that to filter the
+            // successors matrix.
+            1..=2 => {
+                let mut target_prefix = 0u32;
+                for b in remainder {
+                    target_prefix = target_prefix << 8;
+                    target_prefix += *b as u32;
+                }
+                let shift = (3 - remainder.len()) * 8;
+
+                let (mut start, mut end) = (0u32, 0u32);
+                for (local_successor_idx, successor) in self.successors().enumerate() {
+                    let shifted = successor >> shift;
+                    match shifted.cmp(&target_prefix) {
+                        Ordering::Less => {
+                            start = local_successor_idx as u32 + 1;
+                            end = local_successor_idx as u32 + 1;
+                        }
+                        Ordering::Equal => {
+                            end = local_successor_idx as u32 + 1;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if start == end {
+                    // The range of matching successors is empty, so return early with no matches.
+                    return Box::new(std::iter::empty());
+                }
+
+                let doc_iter = self
+                    .matrix()
+                    .filter_map(move |(local_doc_id, local_successor_id)| {
+                        if (start..end).contains(&local_successor_id) {
+                            Some(local_doc_id)
                         } else {
                             None
                         }
-                    });
+                    })
+                    .dedup();
 
-            let target_local_successor_id = match first_non_none {
-                Some(l) => l as u32,
-                None => return Box::new(std::iter::empty()),
-            };
+                Box::new(DocIDMapper::new(
+                    self.docs().enumerate().map(|(i, j)| (i as u32, j)),
+                    doc_iter,
+                ))
+            }
 
-            let doc_iter = self
-                .matrix()
-                .filter_map(move |(local_doc_id, local_successor_id)| {
-                    if local_successor_id == target_local_successor_id {
-                        Some(local_doc_id)
-                    } else {
-                        None
-                    }
-                });
+            // In the case where we have at least a full trigram, we filter to only successor
+            // trigrams that exactly match that.
+            _ => {
+                let target_successor_id = TrigramID::from(Trigram::try_from(remainder).unwrap());
+                let first_non_none =
+                    self.successors()
+                        .enumerate()
+                        .find_map(|(local_id, successor_id)| {
+                            if successor_id == target_successor_id {
+                                Some(local_id)
+                            } else {
+                                None
+                            }
+                        });
 
-            Box::new(DocIDMapper::new(
-                self.docs().enumerate().map(|(i, j)| (i as u32, j)),
-                doc_iter,
-            ))
-        } else if remainder.len() == 0 {
-            Box::new(self.docs())
-        } else {
-            todo!("implement 4-grams and 5-grams")
+                let target_local_successor_id = match first_non_none {
+                    Some(l) => l as u32,
+                    None => return Box::new(std::iter::empty()),
+                };
+
+                let doc_iter =
+                    self.matrix()
+                        .filter_map(move |(local_doc_id, local_successor_id)| {
+                            if local_successor_id == target_local_successor_id {
+                                Some(local_doc_id)
+                            } else {
+                                None
+                            }
+                        });
+
+                Box::new(DocIDMapper::new(
+                    self.docs().enumerate().map(|(i, j)| (i as u32, j)),
+                    doc_iter,
+                ))
+            }
         }
     }
 }
@@ -334,8 +388,8 @@ struct DocIDMapper<DI, LDI> {
 
 impl<DI, LDI> DocIDMapper<DI, LDI>
 where
-    DI: Iterator<Item = (LocalDocID, DocID)>,
-    LDI: Iterator<Item = LocalDocID>,
+    DI: Iterator<Item = (LocalDocIdx, DocID)>,
+    LDI: Iterator<Item = LocalDocIdx>,
 {
     pub fn new(doc_id_iterator: DI, local_doc_iterator: LDI) -> Self {
         Self {
@@ -347,8 +401,8 @@ where
 
 impl<DI, LDI> Iterator for DocIDMapper<DI, LDI>
 where
-    DI: Iterator<Item = (LocalDocID, DocID)>,
-    LDI: Iterator<Item = LocalDocID>,
+    DI: Iterator<Item = (LocalDocIdx, DocID)>,
+    LDI: Iterator<Item = LocalDocIdx>,
 {
     type Item = DocID;
 
@@ -387,5 +441,17 @@ mod test {
         let index = Index::new(Mem(output)).unwrap();
         let doc_ids = index.search(b"string").collect::<Vec<DocID>>();
         assert_eq!(&doc_ids, &[0, 1]);
+
+        let doc_ids = index.search(b"strin").collect::<Vec<DocID>>();
+        assert_eq!(&doc_ids, &[0, 1]);
+
+        let doc_ids = index.search(b"stri").collect::<Vec<DocID>>();
+        assert_eq!(&doc_ids, &[0, 1]);
+
+        let doc_ids = index.search(b"str").collect::<Vec<DocID>>();
+        assert_eq!(&doc_ids, &[0, 1]);
+
+        let doc_ids = index.search(b"abr").collect::<Vec<DocID>>();
+        assert_eq!(&doc_ids, &[2]);
     }
 }

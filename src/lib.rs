@@ -9,9 +9,9 @@ pub mod index;
 pub mod ioutil;
 
 pub type TrigramID = u32;
-pub type LocalSuccessorID = u32;
+pub type LocalSuccessorIdx = u32;
 pub type DocID = u32;
-pub type LocalDocID = u32;
+pub type LocalDocIdx = u32;
 
 #[derive(Default, Eq, PartialOrd, Ord, PartialEq, Hash, Copy, Clone)]
 pub struct Trigram([u8; 3]);

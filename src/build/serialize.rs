@@ -129,6 +129,7 @@ pub struct U32DeltaDecompressor<R: Read> {
     buf: [u8; BitPacker4x::BLOCK_LEN * 4],
 }
 
+// TODO this should implement ExactSizeIterator
 impl<R: Read> Iterator for U32DeltaDecompressor<R> {
     type Item = u32;
 
