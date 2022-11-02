@@ -1,13 +1,10 @@
 use std::io::{Read, Write};
 use std::ops::Range;
 
+use crate::ioutil::StreamWriter;
 use anyhow::Result;
 use bitpacking::{BitPacker, BitPacker4x};
 use integer_encoding::{VarIntReader, VarIntWriter};
-
-pub trait StreamWriter {
-    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize>;
-}
 
 pub struct U32Compressor<'a>(pub &'a [u32]);
 

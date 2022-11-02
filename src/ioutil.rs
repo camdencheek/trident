@@ -5,7 +5,9 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::marker::PhantomData;
 use std::os::unix::fs::FileExt;
 
-use crate::build::serialize::StreamWriter;
+pub trait StreamWrite {
+    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize>;
+}
 
 pub trait ReadAt {
     fn read_at(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
@@ -119,7 +121,7 @@ pub struct Section<P: SectionType = ()> {
     _parent_type: PhantomData<P>,
 }
 
-impl<T: SectionType> StreamWriter for Section<T> {
+impl<T: SectionType> StreamWrite for Section<T> {
     fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
         w.write_u64::<LittleEndian>(self.offset)?;
         w.write_u64::<LittleEndian>(self.len)?;

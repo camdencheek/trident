@@ -8,8 +8,8 @@ use itertools::Itertools;
 
 use super::ioutil::Section;
 use crate::build::serialize::U32DeltaDecompressor;
-use crate::ioutil::{Cursor, Len, ReadAt};
-use crate::{build::serialize::StreamWriter, DocID, LocalDocIdx, Trigram};
+use crate::ioutil::{Cursor, Len, ReadAt, StreamWriter};
+use crate::{DocID, LocalDocIdx, Trigram};
 use crate::{LocalSuccessorIdx, TrigramID};
 
 pub struct Index<R> {

@@ -8,13 +8,13 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::index::{IndexHeader, PostingHeader};
-use crate::ioutil::Section;
+use crate::ioutil::{Section, StreamWriter};
 use crate::Trigram;
 use crate::{DocID, TrigramID};
 
 pub mod serialize;
 pub mod stats;
-use serialize::{StreamWriter, U32DeltaCompressor};
+use serialize::U32DeltaCompressor;
 use stats::{IndexStats, SequenceStats, TrigramPostingStats};
 
 use self::stats::{BuildStats, ExtractStats};

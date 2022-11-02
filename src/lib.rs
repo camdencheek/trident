@@ -5,6 +5,7 @@
 use std::fmt;
 
 pub mod build;
+pub mod db;
 pub mod index;
 pub mod ioutil;
 
