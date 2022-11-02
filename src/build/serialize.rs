@@ -1,15 +1,14 @@
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::ops::Range;
 
-use crate::ioutil::StreamWriter;
-use anyhow::Result;
+use crate::ioutil::stream::StreamWrite;
 use bitpacking::{BitPacker, BitPacker4x};
 use integer_encoding::{VarIntReader, VarIntWriter};
 
 pub struct U32Compressor<'a>(pub &'a [u32]);
 
-impl StreamWriter for U32Compressor<'_> {
-    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+impl StreamWrite for U32Compressor<'_> {
+    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         let mut size = 0;
         let mut chunks = self.0.chunks_exact(BitPacker4x::BLOCK_LEN);
 
@@ -34,8 +33,8 @@ impl StreamWriter for U32Compressor<'_> {
 
 pub struct U32DeltaCompressor<'a>(pub &'a [u32]);
 
-impl StreamWriter for U32DeltaCompressor<'_> {
-    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+impl StreamWrite for U32DeltaCompressor<'_> {
+    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         assert!(self.0.is_sorted());
         let mut size = 0;
         let mut chunks = self.0.chunks_exact(BitPacker4x::BLOCK_LEN);

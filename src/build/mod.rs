@@ -8,7 +8,7 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::index::{IndexHeader, PostingHeader};
-use crate::ioutil::{Section, StreamWriter};
+use crate::ioutil::{stream::StreamWrite, Section};
 use crate::Trigram;
 use crate::{DocID, TrigramID};
 

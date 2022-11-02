@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::io::BufReader;
+use std::io::{self, BufReader};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use anyhow::{Context, Result};
@@ -8,7 +8,7 @@ use itertools::Itertools;
 
 use super::ioutil::Section;
 use crate::build::serialize::U32DeltaDecompressor;
-use crate::ioutil::{Cursor, Len, ReadAt, StreamWriter};
+use crate::ioutil::{stream::StreamWrite, Cursor, Len, ReadAt};
 use crate::{DocID, LocalDocIdx, Trigram};
 use crate::{LocalSuccessorIdx, TrigramID};
 
@@ -301,8 +301,8 @@ impl IndexHeader {
     }
 }
 
-impl StreamWriter for IndexHeader {
-    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+impl StreamWrite for IndexHeader {
+    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         w.write_u32::<LittleEndian>(self.num_docs)?;
         let mut n = 4;
         n += self.trigram_postings.write_to(w)?;
@@ -360,8 +360,8 @@ impl PostingHeader {
     }
 }
 
-impl StreamWriter for PostingHeader {
-    fn write_to<W: Write>(&self, w: &mut W) -> Result<usize> {
+impl StreamWrite for PostingHeader {
+    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         w.write_all(&<[u8; 3]>::from(self.trigram))?;
         w.write_u32::<LittleEndian>(self.successors_count)?;
         w.write_u32::<LittleEndian>(self.successors_bytes)?;
