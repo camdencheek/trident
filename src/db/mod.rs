@@ -2,7 +2,6 @@ use anyhow::anyhow;
 use std::io::{self, Read, Write};
 
 use crate::ioutil::stream::{StreamRead, StreamWrite};
-use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
 // TODO should these be defined in a higher-level module?
 type Trigram = [u8; 3];
@@ -38,7 +37,7 @@ impl StreamWrite for DBKey {
 
 impl StreamRead for DBKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
-        match r.read_u8()? {
+        match u8::read_from(r)? {
             0 => Ok(Self::Shard(ShardID::read_from(r)?, ShardKey::read_from(r)?)),
             _ => Err(anyhow!("bad discriminant")),
         }
@@ -73,7 +72,7 @@ impl StreamWrite for ShardKey {
 
 impl StreamRead for ShardKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
-        match r.read_u8()? {
+        match u8::read_from(r)? {
             0 => Ok(Self::BlobIndex(BlobIndexKey::read_from(r)?)),
             1 => Ok(Self::BlobContents(OID::read_from(r)?)),
             _ => Err(anyhow!("bad discriminant")),
@@ -109,7 +108,7 @@ impl StreamWrite for BlobIndexKey {
 
 impl StreamRead for BlobIndexKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
-        match r.read_u8()? {
+        match u8::read_from(r)? {
             0 => Ok(Self::TrigramPosting(
                 Trigram::read_from(r)?,
                 TrigramPostingKey::read_from(r)?,
@@ -157,7 +156,7 @@ impl StreamWrite for TrigramPostingKey {
 
 impl StreamRead for TrigramPostingKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
-        match r.read_u8()? {
+        match u8::read_from(r)? {
             0 => Ok(Self::SuccessorCount),
             1 => Ok(Self::MatrixCount),
             2 => Ok(Self::DocCount),
