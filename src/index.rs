@@ -426,33 +426,33 @@ fn reader_in<R: ReadAt>(r: &R, section: Section) -> BufReader<Cursor<&R>> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::{build::IndexBuilder, ioutil::Mem};
+    // use super::*;
+    // use crate::{build::IndexBuilder, ioutil::Mem};
 
-    #[test]
-    fn test_search() {
-        let mut builder = IndexBuilder::new();
-        builder.add_doc(b"test string 1").unwrap();
-        builder.add_doc(b"test string 2").unwrap();
-        builder.add_doc(b"abracadabra").unwrap();
+    // #[test]
+    // fn test_search() {
+    //     let mut builder = IndexBuilder::new();
+    //     builder.add_doc(b"test string 1").unwrap();
+    //     builder.add_doc(b"test string 2").unwrap();
+    //     builder.add_doc(b"abracadabra").unwrap();
 
-        let mut output = Vec::new();
-        builder.build(&mut output).unwrap();
+    //     let mut output = Vec::new();
+    //     builder.build(&mut output).unwrap();
 
-        let index = Index::new(Mem(output)).unwrap();
-        let doc_ids = index.candidates(b"string").collect::<Vec<DocID>>();
-        assert_eq!(&doc_ids, &[0, 1]);
+    //     let index = Index::new(Mem(output)).unwrap();
+    //     let doc_ids = index.candidates(b"string").collect::<Vec<DocID>>();
+    //     assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.candidates(b"strin").collect::<Vec<DocID>>();
-        assert_eq!(&doc_ids, &[0, 1]);
+    //     let doc_ids = index.candidates(b"strin").collect::<Vec<DocID>>();
+    //     assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.candidates(b"stri").collect::<Vec<DocID>>();
-        assert_eq!(&doc_ids, &[0, 1]);
+    //     let doc_ids = index.candidates(b"stri").collect::<Vec<DocID>>();
+    //     assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.candidates(b"str").collect::<Vec<DocID>>();
-        assert_eq!(&doc_ids, &[0, 1]);
+    //     let doc_ids = index.candidates(b"str").collect::<Vec<DocID>>();
+    //     assert_eq!(&doc_ids, &[0, 1]);
 
-        let doc_ids = index.candidates(b"abr").collect::<Vec<DocID>>();
-        assert_eq!(&doc_ids, &[2]);
-    }
+    //     let doc_ids = index.candidates(b"abr").collect::<Vec<DocID>>();
+    //     assert_eq!(&doc_ids, &[2]);
+    // }
 }

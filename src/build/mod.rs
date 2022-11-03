@@ -4,9 +4,13 @@ use std::time::Instant;
 use std::{io::Write, time::Duration};
 
 use anyhow::Result;
+use bitpacking::{BitPacker, BitPacker4x};
 use byteorder::{LittleEndian, WriteBytesExt};
+use integer_encoding::{VarIntReader, VarIntWriter};
+use rocksdb::SstFileWriter;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::db::{BlobIndexKey, DBKey, ShardKey, TrigramPostingKey};
 use crate::index::{IndexHeader, PostingHeader};
 use crate::ioutil::{stream::StreamWrite, Section};
 use crate::Trigram;
@@ -114,11 +118,12 @@ impl IndexBuilder {
         res
     }
 
-    fn build_unique_successors<W: Write>(
+    fn build_unique_successors_sst(
         &mut self,
-        w: &mut W,
+        w: &mut SstFileWriter,
+        trigram: Trigram,
         docs: &[(DocID, FxHashSet<Trigram>)],
-    ) -> Result<(Vec<TrigramID>, SequenceStats)> {
+    ) -> Result<Vec<TrigramID>> {
         // Collect the successors for each doc into a deduplicated set of unique successors.
         // TODO perf test a btree hash set, which would allow us to skip the collect into vec and
         // sort steps below.
@@ -131,25 +136,32 @@ impl IndexBuilder {
             Vec::from_iter(self.buf_trigram_set.iter().copied().map(u32::from));
         unique_trigrams.sort();
 
-        let compressed_size = U32DeltaCompressor(&unique_trigrams).write_to(w)?;
+        let block_id_to_key = |block_id| {
+            DBKey::Shard(
+                0,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    trigram.into(),
+                    TrigramPostingKey::SuccessorsBlock(block_id as u32),
+                )),
+            )
+            .to_vec()
+        };
 
-        let unique_trigrams_count = unique_trigrams.len();
-        Ok((
-            unique_trigrams,
-            SequenceStats {
-                count: unique_trigrams_count,
-                bytes: compressed_size,
-            },
-        ))
+        for (i, chunk) in write_compressed_u32s(&self.buf_u32).iter().enumerate() {
+            w.put(block_id_to_key(i), chunk)?;
+        }
+
+        Ok(unique_trigrams)
     }
 
     // Called per unique trigram
-    fn build_successors<W: Write>(
+    fn build_successors_sst(
         &mut self,
-        w: &mut W,
+        w: &mut SstFileWriter,
+        trigram: Trigram,
         unique_successors: &[TrigramID],
         docs: &[(DocID, FxHashSet<Trigram>)],
-    ) -> Result<SequenceStats> {
+    ) -> Result<()> {
         self.buf_u32.clear();
         for (local_doc_id, (doc_id, successors)) in docs.iter().enumerate() {
             let offset = local_doc_id * unique_successors.len();
@@ -165,114 +177,98 @@ impl IndexBuilder {
             self.buf_u32[l - successors.len()..].sort();
         }
 
-        let compressed_size = U32DeltaCompressor(&self.buf_u32).write_to(w)?;
+        let block_id_to_key = |block_id| {
+            DBKey::Shard(
+                0,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    trigram.into(),
+                    TrigramPostingKey::MatrixBlock(block_id as u32),
+                )),
+            )
+            .to_vec()
+        };
 
-        Ok(SequenceStats {
-            count: self.buf_u32.len(),
-            bytes: compressed_size,
-        })
+        for (i, chunk) in write_compressed_u32s(&self.buf_u32).iter().enumerate() {
+            w.put(block_id_to_key(i), chunk)?;
+        }
+
+        Ok(())
     }
 
-    fn build_unique_docs<W: Write>(
+    fn build_unique_docs_sst(
         &mut self,
-        w: &mut W,
+        w: &mut SstFileWriter,
+        trigram: Trigram,
         docs: &[(DocID, FxHashSet<Trigram>)],
-    ) -> Result<SequenceStats> {
+    ) -> Result<()> {
         self.buf_u32.clear();
         self.buf_u32.extend(docs.iter().map(|(id, _)| id));
 
-        let compressed_size = U32DeltaCompressor(&self.buf_u32).write_to(w)?;
+        let block_id_to_key = |block_id| {
+            DBKey::Shard(
+                0,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    trigram.into(),
+                    TrigramPostingKey::DocsBlock(block_id as u32),
+                )),
+            )
+            .to_vec()
+        };
 
-        Ok(SequenceStats {
-            count: self.buf_u32.len(),
-            bytes: compressed_size,
-        })
+        for (i, chunk) in write_compressed_u32s(&self.buf_u32).iter().enumerate() {
+            w.put(block_id_to_key(i), chunk)?;
+        }
+
+        Ok(())
     }
 
-    fn build_posting<W: Write>(
+    fn build_posting_sst<'a>(
         &mut self,
-        w: &mut W,
+        w: &mut SstFileWriter<'a>,
         trigram: Trigram,
         docs: &[(DocID, FxHashSet<Trigram>)],
-    ) -> Result<TrigramPostingStats> {
-        let mut buf = Vec::new();
+    ) -> Result<()> {
+        let unique_successors = self.build_unique_successors_sst(w, trigram, &docs)?;
+        self.build_successors_sst(w, trigram, &unique_successors, &docs)?;
+        self.build_unique_docs_sst(w, trigram, &docs)?;
 
-        let (unique_successors, unique_successors_stats) =
-            self.build_unique_successors(&mut buf, &docs)?;
-        let successors_stats = self.build_successors(&mut buf, &unique_successors, &docs)?;
-        let unique_docs_stats = self.build_unique_docs(&mut buf, &docs)?;
-
-        let header = PostingHeader {
-            trigram,
-            successors_count: unique_successors_stats.count.try_into()?,
-            successors_bytes: unique_successors_stats.bytes.try_into()?,
-            matrix_count: successors_stats.count.try_into()?,
-            matrix_bytes: successors_stats.bytes.try_into()?,
-            docs_count: unique_docs_stats.count.try_into()?,
-            docs_bytes: unique_docs_stats.bytes.try_into()?,
-        };
-
-        let header_bytes = header.write_to(w)?;
-        w.write_all(&buf)?;
-
-        Ok(TrigramPostingStats {
-            header_bytes,
-            unique_successors: unique_successors_stats,
-            successors: successors_stats,
-            unique_docs: unique_docs_stats,
-        })
+        Ok(())
     }
 
-    pub fn build<W: Write>(mut self, w: &mut W) -> Result<IndexStats> {
-        let extract_stats = ExtractStats {
-            num_docs: self.num_docs,
-            doc_bytes: self.total_doc_bytes,
-            unique_trigrams: self.combined.len(),
-            extract_time: self.extract_duration,
-        };
-
-        let build_start = Instant::now();
-        let mut build_stats = BuildStats::default();
-        let mut posting_ends: Vec<(Trigram, u64)> = Vec::new();
-        let mut postings_len: u64 = 0;
-
+    pub fn build_sst<'a>(mut self, w: &mut SstFileWriter<'a>) -> Result<()> {
         for (trigram, docs) in std::mem::take(&mut self.combined).into_iter() {
-            let posting_stats = self.build_posting(w, trigram, &docs)?;
-            build_stats.add_posting(&posting_stats);
-            postings_len += posting_stats.total_bytes() as u64;
-            posting_ends.push((trigram, postings_len));
+            self.build_posting_sst(w, trigram, &docs)?;
         }
 
-        let mut unique_trigrams_len = 0;
-        for (trigram, _) in posting_ends.iter() {
-            unique_trigrams_len += w.write(&<[u8; 3]>::from(*trigram))?;
-        }
-
-        let mut offsets_len = 0;
-        for (_, offset) in posting_ends.iter() {
-            w.write_u64::<LittleEndian>(*offset)?;
-            offsets_len += 4;
-        }
-
-        let header = IndexHeader {
-            num_docs: self.num_docs as u32,
-            trigram_postings: Section::new(0, postings_len),
-            unique_trigrams: Section::new(postings_len, unique_trigrams_len as u64),
-            trigram_posting_ends: Section::new(
-                postings_len + unique_trigrams_len as u64,
-                offsets_len,
-            ),
-        };
-
-        header.write_to(w)?;
-
-        build_stats.posting_offsets_bytes = offsets_len as usize;
-        build_stats.build_time = build_start.elapsed();
-
-        Ok(IndexStats {
-            extract: extract_stats,
-            build: build_stats,
-            total_time: self.creation_time.elapsed(),
-        })
+        Ok(())
     }
+}
+
+fn write_compressed_u32s(list: &[u32]) -> Vec<Vec<u8>> {
+    assert!(list.is_sorted());
+    let mut chunks = list.chunks_exact(BitPacker4x::BLOCK_LEN);
+    let mut last = 0;
+    let mut buf = [0u8; 4 * BitPacker4x::BLOCK_LEN];
+    let mut res = Vec::new();
+
+    for chunk in chunks.by_ref() {
+        let bp = BitPacker4x::new();
+        let num_bits = bp.num_bits_sorted(last, &chunk);
+        let mut compressed_block =
+            Vec::with_capacity(1 + num_bits as usize * BitPacker4x::BLOCK_LEN);
+        compressed_block.write(&[num_bits]).unwrap();
+        let n = bp.compress_sorted(last, &chunk, &mut buf, num_bits);
+        compressed_block.write(&buf[..n]).unwrap();
+        last = *chunk.last().unwrap();
+        res.push(compressed_block)
+    }
+
+    let mut remainder_chunk = Vec::new();
+    for i in chunks.remainder() {
+        remainder_chunk.write_varint(*i - last).unwrap();
+        last = *i;
+    }
+    res.push(remainder_chunk);
+
+    res
 }

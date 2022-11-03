@@ -5,6 +5,7 @@ use std::{fs::File, path::PathBuf};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use rocksdb::{Options, SstFileWriter};
 use trident::build::stats::IndexStats;
 use trident::build::IndexBuilder;
 use trident::index::Index;
@@ -25,7 +26,7 @@ pub enum Command {
 #[derive(Parser, Debug)]
 pub struct IndexArgs {
     #[clap(short = 'o')]
-    pub output_file: Option<PathBuf>,
+    pub output_file: PathBuf,
     pub dir: PathBuf,
 }
 
@@ -61,17 +62,11 @@ fn index(args: IndexArgs) -> Result<()> {
         builder.add_doc(buf.as_bytes())?;
     }
 
-    let stats = match args.output_file {
-        Some(path) => {
-            let mut f = BufWriter::new(File::create(path)?);
-            builder.build(&mut f)?
-        }
-        None => {
-            let mut stdout = std::io::stdout().lock();
-            builder.build(&mut stdout)?
-        }
-    };
-    summarize_stats(stats);
+    // TODO does this SST file self-index? Or does indexing need to happen on import?
+    let opts = Options::default();
+    let mut sst_writer = SstFileWriter::create(&opts);
+    sst_writer.open(args.output_file)?;
+    builder.build_sst(&mut sst_writer)?;
     Ok(())
 }
 

@@ -10,7 +10,7 @@ type OID = [u8; 20];
 type BlockID = u32;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum DBKey {
+pub enum DBKey {
     Shard(ShardID, ShardKey),
 }
 
@@ -45,7 +45,7 @@ impl StreamRead for DBKey {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum ShardKey {
+pub enum ShardKey {
     BlobIndex(BlobIndexKey),
     BlobContents(OID),
 }
@@ -81,7 +81,7 @@ impl StreamRead for ShardKey {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum BlobIndexKey {
+pub enum BlobIndexKey {
     TrigramPosting(Trigram, TrigramPostingKey),
 }
 
@@ -119,7 +119,7 @@ impl StreamRead for BlobIndexKey {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum TrigramPostingKey {
+pub enum TrigramPostingKey {
     SuccessorCount,
     MatrixCount,
     DocCount,
