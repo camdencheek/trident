@@ -19,6 +19,7 @@ rustc-hash = "1.1.0"
 walkdir = "2.3.2"
 
 [dev-dependencies]
+insta = "1.21.0"
 # quickcheck = "1.0.3"
 quickcheck = { git = "https://github.com/Mathspy/quickcheck", branch = "add-support-for-arrays" }
 

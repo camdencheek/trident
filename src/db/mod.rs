@@ -174,6 +174,7 @@ mod test {
     use std::io::Cursor;
 
     use super::*;
+    use insta::assert_debug_snapshot;
     use quickcheck::{quickcheck, Arbitrary};
 
     impl Arbitrary for DBKey {
@@ -219,5 +220,55 @@ mod test {
             let mut r = Cursor::new(v);
             key == DBKey::read_from(&mut r).unwrap()
         }
+    }
+
+    // This test checks that the sort order of the set of keys does not change.
+    // This is important for iterating over entries in order.
+    #[test]
+    fn stable_sort_order() {
+        let keys = [
+            DBKey::Shard(
+                42,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    *b"abc",
+                    TrigramPostingKey::DocCount,
+                )),
+            ),
+            DBKey::Shard(
+                42,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    *b"abc",
+                    TrigramPostingKey::MatrixBlock(24),
+                )),
+            ),
+            DBKey::Shard(
+                42,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    *b"abc",
+                    TrigramPostingKey::SuccessorCount,
+                )),
+            ),
+            DBKey::Shard(
+                42,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    *b"abc",
+                    TrigramPostingKey::MatrixBlock(42),
+                )),
+            ),
+            DBKey::Shard(42, ShardKey::BlobContents([0; 20])),
+            DBKey::Shard(42, ShardKey::BlobContents([2; 20])),
+            DBKey::Shard(
+                35,
+                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                    *b"abc",
+                    TrigramPostingKey::DocCount,
+                )),
+            ),
+        ];
+
+        let mut serialized = keys.iter().map(|key| key.to_vec()).collect::<Vec<_>>();
+        serialized.sort();
+
+        assert_debug_snapshot!(serialized)
     }
 }
