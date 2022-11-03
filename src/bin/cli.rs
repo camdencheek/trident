@@ -5,7 +5,7 @@ use std::{fs::File, path::PathBuf};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use rocksdb::{Options, SstFileWriter};
+use rocksdb::{Options, SstFileWriter, DB};
 use trident::build::stats::IndexStats;
 use trident::build::IndexBuilder;
 use trident::index::Index;
@@ -20,6 +20,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     Index(IndexArgs),
+    Import(ImportArgs),
     Search(SearchArgs),
 }
 
@@ -28,6 +29,12 @@ pub struct IndexArgs {
     #[clap(short = 'o')]
     pub output_file: PathBuf,
     pub dir: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+pub struct ImportArgs {
+    pub import_path: PathBuf,
+    pub index_path: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -40,6 +47,7 @@ fn main() -> Result<()> {
     let args = Cli::try_parse()?;
     match args.cmd {
         Command::Index(a) => index(a),
+        Command::Import(a) => import(a),
         Command::Search(a) => search(a),
     }
 }
@@ -67,6 +75,15 @@ fn index(args: IndexArgs) -> Result<()> {
     let mut sst_writer = SstFileWriter::create(&opts);
     sst_writer.open(args.output_file)?;
     builder.build_sst(&mut sst_writer)?;
+    sst_writer.finish()?;
+    Ok(())
+}
+
+fn import(args: ImportArgs) -> Result<()> {
+    println!("opening");
+    let db = DB::open_default(args.index_path)?;
+    println!("importing");
+    db.ingest_external_file(vec![args.import_path])?;
     Ok(())
 }
 
