@@ -1,6 +1,7 @@
-use std::io::{self, Write};
+use anyhow::anyhow;
+use std::io::{self, Read, Write};
 
-use crate::ioutil::stream::StreamWrite;
+use crate::ioutil::stream::{StreamRead, StreamWrite};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
 // TODO should these be defined in a higher-level module?
@@ -9,6 +10,7 @@ type ShardID = u16;
 type OID = [u8; 20];
 type BlockID = u32;
 
+#[derive(PartialEq, Eq, Clone, Debug)]
 enum DBKey {
     Shard(ShardID, ShardKey),
 }
@@ -34,6 +36,16 @@ impl StreamWrite for DBKey {
     }
 }
 
+impl StreamRead for DBKey {
+    fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
+        match r.read_u8()? {
+            0 => Ok(Self::Shard(ShardID::read_from(r)?, ShardKey::read_from(r)?)),
+            _ => Err(anyhow!("bad discriminant")),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
 enum ShardKey {
     BlobIndex(BlobIndexKey),
     BlobContents(OID),
@@ -59,6 +71,17 @@ impl StreamWrite for ShardKey {
     }
 }
 
+impl StreamRead for ShardKey {
+    fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
+        match r.read_u8()? {
+            0 => Ok(Self::BlobIndex(BlobIndexKey::read_from(r)?)),
+            1 => Ok(Self::BlobContents(OID::read_from(r)?)),
+            _ => Err(anyhow!("bad discriminant")),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
 enum BlobIndexKey {
     TrigramPosting(Trigram, TrigramPostingKey),
 }
@@ -84,6 +107,19 @@ impl StreamWrite for BlobIndexKey {
     }
 }
 
+impl StreamRead for BlobIndexKey {
+    fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
+        match r.read_u8()? {
+            0 => Ok(Self::TrigramPosting(
+                Trigram::read_from(r)?,
+                TrigramPostingKey::read_from(r)?,
+            )),
+            _ => Err(anyhow!("bad discriminant")),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
 enum TrigramPostingKey {
     SuccessorCount,
     MatrixCount,
@@ -119,7 +155,69 @@ impl StreamWrite for TrigramPostingKey {
     }
 }
 
+impl StreamRead for TrigramPostingKey {
+    fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
+        match r.read_u8()? {
+            0 => Ok(Self::SuccessorCount),
+            1 => Ok(Self::MatrixCount),
+            2 => Ok(Self::DocCount),
+            3 => Ok(Self::SuccessorsBlock(BlockID::read_from(r)?)),
+            4 => Ok(Self::MatrixBlock(BlockID::read_from(r)?)),
+            5 => Ok(Self::DocsBlock(BlockID::read_from(r)?)),
+            _ => Err(anyhow!("bad discriminant")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
-    // TODO: snapshot tests to ensure the serialized representation does not change
+    use std::io::Cursor;
+
+    use super::*;
+    use quickcheck::{quickcheck, Arbitrary};
+
+    impl Arbitrary for DBKey {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            Self::Shard(ShardID::arbitrary(g), ShardKey::arbitrary(g))
+        }
+    }
+
+    impl Arbitrary for ShardKey {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            match u8::arbitrary(g) % 2 {
+                0 => Self::BlobIndex(BlobIndexKey::arbitrary(g)),
+                1 => Self::BlobContents(OID::arbitrary(g)),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl Arbitrary for BlobIndexKey {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            Self::TrigramPosting(Trigram::arbitrary(g), TrigramPostingKey::arbitrary(g))
+        }
+    }
+
+    impl Arbitrary for TrigramPostingKey {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            match u8::arbitrary(g) % 6 {
+                0 => Self::SuccessorCount,
+                1 => Self::MatrixCount,
+                2 => Self::DocCount,
+                3 => Self::SuccessorsBlock(BlockID::arbitrary(g)),
+                4 => Self::MatrixBlock(BlockID::arbitrary(g)),
+                5 => Self::DocsBlock(BlockID::arbitrary(g)),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    quickcheck! {
+        // Test that any DBKey can be roundtripped
+        fn db_key_roundtrip(key: DBKey) -> bool {
+            let v = key.to_vec();
+            let mut r = Cursor::new(v);
+            key == DBKey::read_from(&mut r).unwrap()
+        }
+    }
 }
