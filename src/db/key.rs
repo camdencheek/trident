@@ -5,19 +5,19 @@ use crate::ioutil::stream::{StreamRead, StreamWrite};
 
 // TODO should these be defined in a higher-level module?
 type Trigram = [u8; 3];
-type ShardID = u16;
+type PartitionID = u16;
 type OID = [u8; 20];
 type BlockID = u32;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum DBKey {
-    Shard(ShardID, ShardKey),
+    Partition(PartitionID, PartitionKey),
 }
 
 impl DBKey {
     fn discriminant(&self) -> u8 {
         match self {
-            Self::Shard(_, _) => 0,
+            Self::Partition(_, _) => 0,
         }
     }
 }
@@ -26,7 +26,7 @@ impl StreamWrite for DBKey {
     fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         let mut n = self.discriminant().write_to(w)?;
         match self {
-            Self::Shard(id, key) => {
+            Self::Partition(id, key) => {
                 n += id.write_to(w)?;
                 n += key.write_to(w)?;
             }
@@ -38,19 +38,22 @@ impl StreamWrite for DBKey {
 impl StreamRead for DBKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
         match u8::read_from(r)? {
-            0 => Ok(Self::Shard(ShardID::read_from(r)?, ShardKey::read_from(r)?)),
+            0 => Ok(Self::Partition(
+                PartitionID::read_from(r)?,
+                PartitionKey::read_from(r)?,
+            )),
             _ => Err(anyhow!("bad discriminant")),
         }
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum ShardKey {
+pub enum PartitionKey {
     BlobIndex(BlobIndexKey),
     BlobContents(OID),
 }
 
-impl ShardKey {
+impl PartitionKey {
     fn discriminant(&self) -> u8 {
         match self {
             Self::BlobIndex(_) => 0,
@@ -59,7 +62,7 @@ impl ShardKey {
     }
 }
 
-impl StreamWrite for ShardKey {
+impl StreamWrite for PartitionKey {
     fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         let mut n = self.discriminant().write_to(w)?;
         match self {
@@ -70,7 +73,7 @@ impl StreamWrite for ShardKey {
     }
 }
 
-impl StreamRead for ShardKey {
+impl StreamRead for PartitionKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
         match u8::read_from(r)? {
             0 => Ok(Self::BlobIndex(BlobIndexKey::read_from(r)?)),
@@ -178,11 +181,11 @@ mod test {
 
     impl Arbitrary for DBKey {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            Self::Shard(ShardID::arbitrary(g), ShardKey::arbitrary(g))
+            Self::Partition(PartitionID::arbitrary(g), PartitionKey::arbitrary(g))
         }
     }
 
-    impl Arbitrary for ShardKey {
+    impl Arbitrary for PartitionKey {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
             match u8::arbitrary(g) % 2 {
                 0 => Self::BlobIndex(BlobIndexKey::arbitrary(g)),
@@ -226,39 +229,39 @@ mod test {
     #[test]
     fn stable_sort_order() {
         let keys = [
-            DBKey::Shard(
+            DBKey::Partition(
                 42,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::DocCount,
                 )),
             ),
-            DBKey::Shard(
+            DBKey::Partition(
                 42,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::MatrixBlock(24),
                 )),
             ),
-            DBKey::Shard(
+            DBKey::Partition(
                 42,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::SuccessorCount,
                 )),
             ),
-            DBKey::Shard(
+            DBKey::Partition(
                 42,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::MatrixBlock(42),
                 )),
             ),
-            DBKey::Shard(42, ShardKey::BlobContents([0; 20])),
-            DBKey::Shard(42, ShardKey::BlobContents([2; 20])),
-            DBKey::Shard(
+            DBKey::Partition(42, PartitionKey::BlobContents([0; 20])),
+            DBKey::Partition(42, PartitionKey::BlobContents([2; 20])),
+            DBKey::Partition(
                 35,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::DocCount,
                 )),

@@ -10,7 +10,7 @@ use integer_encoding::{VarIntReader, VarIntWriter};
 use rocksdb::SstFileWriter;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::db::{BlobIndexKey, DBKey, ShardKey, TrigramPostingKey};
+use crate::db::{BlobIndexKey, DBKey, PartitionKey, TrigramPostingKey};
 use crate::index::{IndexHeader, PostingHeader};
 use crate::ioutil::{stream::StreamWrite, Section};
 use crate::Trigram;
@@ -130,9 +130,9 @@ impl IndexBuilder {
         unique_trigrams.sort();
 
         let block_id_to_key = |block_id| {
-            DBKey::Shard(
+            DBKey::Partition(
                 0,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     trigram.into(),
                     TrigramPostingKey::SuccessorsBlock(block_id as u32),
                 )),
@@ -171,9 +171,9 @@ impl IndexBuilder {
         }
 
         let block_id_to_key = |block_id| {
-            DBKey::Shard(
+            DBKey::Partition(
                 0,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     trigram.into(),
                     TrigramPostingKey::MatrixBlock(block_id as u32),
                 )),
@@ -198,9 +198,9 @@ impl IndexBuilder {
         self.buf_u32.extend(docs.iter().map(|(id, _)| id));
 
         let block_id_to_key = |block_id| {
-            DBKey::Shard(
+            DBKey::Partition(
                 0,
-                ShardKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
                     trigram.into(),
                     TrigramPostingKey::DocsBlock(block_id as u32),
                 )),
