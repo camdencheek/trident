@@ -20,7 +20,9 @@ walkdir = "2.3.2"
 
 [dev-dependencies]
 insta = "1.21.0"
-# quickcheck = "1.0.3"
+
+# Using a fork of quickcheck because the current release does not support arbitrary arrays
+# quickcheck = "1.0.3" 
 quickcheck = { git = "https://github.com/Mathspy/quickcheck", branch = "add-support-for-arrays" }
 
 [profile.release]
