@@ -8,6 +8,7 @@ type Trigram = [u8; 3];
 type PartitionID = u16;
 type OID = [u8; 20];
 type BlockID = u32;
+type DocID = u32;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum DBKey {
@@ -49,15 +50,15 @@ impl StreamRead for DBKey {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum PartitionKey {
-    BlobIndex(BlobIndexKey),
-    BlobContents(OID),
+    Index(IndexKey),
+    Contents(DocID),
 }
 
 impl PartitionKey {
     fn discriminant(&self) -> u8 {
         match self {
-            Self::BlobIndex(_) => 0,
-            Self::BlobContents(_) => 1,
+            Self::Index(_) => 0,
+            Self::Contents(_) => 1,
         }
     }
 }
@@ -66,8 +67,8 @@ impl StreamWrite for PartitionKey {
     fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         let mut n = self.discriminant().write_to(w)?;
         match self {
-            Self::BlobIndex(key) => n += key.write_to(w)?,
-            Self::BlobContents(oid) => n += oid.write_to(w)?,
+            Self::Index(key) => n += key.write_to(w)?,
+            Self::Contents(oid) => n += oid.write_to(w)?,
         };
         Ok(n)
     }
@@ -76,19 +77,19 @@ impl StreamWrite for PartitionKey {
 impl StreamRead for PartitionKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
         match u8::read_from(r)? {
-            0 => Ok(Self::BlobIndex(BlobIndexKey::read_from(r)?)),
-            1 => Ok(Self::BlobContents(OID::read_from(r)?)),
+            0 => Ok(Self::Index(IndexKey::read_from(r)?)),
+            1 => Ok(Self::Contents(DocID::read_from(r)?)),
             _ => Err(anyhow!("bad discriminant")),
         }
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum BlobIndexKey {
+pub enum IndexKey {
     TrigramPosting(Trigram, TrigramPostingKey),
 }
 
-impl BlobIndexKey {
+impl IndexKey {
     fn discriminant(&self) -> u8 {
         match self {
             Self::TrigramPosting(_, _) => 0,
@@ -96,7 +97,7 @@ impl BlobIndexKey {
     }
 }
 
-impl StreamWrite for BlobIndexKey {
+impl StreamWrite for IndexKey {
     fn write_to<W: Write>(&self, w: &mut W) -> io::Result<usize> {
         let mut n = self.discriminant().write_to(w)?;
         match self {
@@ -109,7 +110,7 @@ impl StreamWrite for BlobIndexKey {
     }
 }
 
-impl StreamRead for BlobIndexKey {
+impl StreamRead for IndexKey {
     fn read_from<R: Read>(r: &mut R) -> anyhow::Result<Self> {
         match u8::read_from(r)? {
             0 => Ok(Self::TrigramPosting(
@@ -188,14 +189,14 @@ mod test {
     impl Arbitrary for PartitionKey {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
             match u8::arbitrary(g) % 2 {
-                0 => Self::BlobIndex(BlobIndexKey::arbitrary(g)),
-                1 => Self::BlobContents(OID::arbitrary(g)),
+                0 => Self::Index(IndexKey::arbitrary(g)),
+                1 => Self::Contents(DocID::arbitrary(g)),
                 _ => unreachable!(),
             }
         }
     }
 
-    impl Arbitrary for BlobIndexKey {
+    impl Arbitrary for IndexKey {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
             Self::TrigramPosting(Trigram::arbitrary(g), TrigramPostingKey::arbitrary(g))
         }
@@ -231,37 +232,37 @@ mod test {
         let keys = [
             DBKey::Partition(
                 42,
-                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::Index(IndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::DocCount,
                 )),
             ),
             DBKey::Partition(
                 42,
-                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::Index(IndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::MatrixBlock(24),
                 )),
             ),
             DBKey::Partition(
                 42,
-                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::Index(IndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::SuccessorCount,
                 )),
             ),
             DBKey::Partition(
                 42,
-                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::Index(IndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::MatrixBlock(42),
                 )),
             ),
-            DBKey::Partition(42, PartitionKey::BlobContents([0; 20])),
-            DBKey::Partition(42, PartitionKey::BlobContents([2; 20])),
+            DBKey::Partition(42, PartitionKey::Contents(0)),
+            DBKey::Partition(42, PartitionKey::Contents(2)),
             DBKey::Partition(
                 35,
-                PartitionKey::BlobIndex(BlobIndexKey::TrigramPosting(
+                PartitionKey::Index(IndexKey::TrigramPosting(
                     *b"abc",
                     TrigramPostingKey::DocCount,
                 )),
