@@ -118,3 +118,8 @@ impl StreamWrite for TrigramPostingKey {
         Ok(n)
     }
 }
+
+#[cfg(test)]
+mod test {
+    // TODO: snapshot tests to ensure the serialized representation does not change
+}
