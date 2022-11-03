@@ -7,7 +7,6 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use itertools::Itertools;
 
 use super::ioutil::Section;
-use crate::build::serialize::U32DeltaDecompressor;
 use crate::ioutil::{stream::StreamWrite, Cursor, Len, ReadAt};
 use crate::{DocID, LocalDocIdx, Trigram};
 use crate::{LocalSuccessorIdx, TrigramID};
@@ -139,37 +138,40 @@ impl<'a, R: ReadAt + Len> PostingSearcher<'a, R> {
     }
 
     fn successors(&self) -> impl Iterator<Item = TrigramID> + 'a {
-        let section = self.postings_section.narrow(
-            self.posting_section
-                .narrow(self.header.successors_section()),
-        );
+        // let section = self.postings_section.narrow(
+        //     self.posting_section
+        //         .narrow(self.header.successors_section()),
+        // );
 
-        U32DeltaDecompressor::new(
-            reader_in(self.r, section),
-            self.header.successors_count as usize,
-        )
+        // U32DeltaDecompressor::new(
+        //     reader_in(self.r, section),
+        //     self.header.successors_count as usize,
+        // )
+        std::iter::empty()
     }
 
     fn matrix(&self) -> impl Iterator<Item = (LocalDocIdx, LocalSuccessorIdx)> + 'a {
-        let section = self
-            .postings_section
-            .narrow(self.posting_section.narrow(self.header.matrix_section()));
+        // let section = self
+        //     .postings_section
+        //     .narrow(self.posting_section.narrow(self.header.matrix_section()));
 
-        let raw = U32DeltaDecompressor::new(
-            reader_in(self.r, section),
-            self.header.matrix_count as usize,
-        );
+        // let raw = U32DeltaDecompressor::new(
+        //     reader_in(self.r, section),
+        //     self.header.matrix_count as usize,
+        // );
 
-        let columns = self.header.successors_count;
-        raw.map(move |i| (i / columns, i % columns))
+        // let columns = self.header.successors_count;
+        // raw.map(move |i| (i / columns, i % columns));
+        std::iter::empty()
     }
 
     fn docs(&self) -> impl Iterator<Item = DocID> + 'a {
-        let section = self
-            .postings_section
-            .narrow(self.posting_section.narrow(self.header.docs_section()));
+        // let section = self
+        //     .postings_section
+        //     .narrow(self.posting_section.narrow(self.header.docs_section()));
 
-        U32DeltaDecompressor::new(reader_in(self.r, section), self.header.docs_count as usize)
+        // U32DeltaDecompressor::new(reader_in(self.r, section), self.header.docs_count as usize)
+        std::iter::empty()
     }
 
     fn search(self, remainder: &[u8]) -> Box<dyn Iterator<Item = DocID> + 'a> {

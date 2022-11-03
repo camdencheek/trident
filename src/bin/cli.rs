@@ -1,4 +1,4 @@
-use std::io::{BufWriter, Read, Write};
+use std::io::Read;
 use std::time::Instant;
 use std::{fs::File, path::PathBuf};
 
@@ -6,7 +6,6 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use rocksdb::{Options, SstFileWriter, DB};
-use trident::build::stats::IndexStats;
 use trident::build::IndexBuilder;
 use trident::index::Index;
 use walkdir::WalkDir;
@@ -19,6 +18,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    // Index a new directory
     Index(IndexArgs),
     Import(ImportArgs),
     Search(SearchArgs),
@@ -85,45 +85,6 @@ fn import(args: ImportArgs) -> Result<()> {
     println!("importing");
     db.ingest_external_file(vec![args.import_path])?;
     Ok(())
-}
-
-fn summarize_stats(stats: IndexStats) {
-    let index_size = stats.build.total_size_bytes();
-    let content_size = stats.extract.doc_bytes;
-    let mbps = stats.extract.doc_bytes as f64 / 1024. / 1024. / stats.total_time.as_secs_f64();
-    println!(
-        "\nIndexed {} in {:.1}s at {:.2} MB/s",
-        bytefmt::format(content_size as u64),
-        stats.total_time.as_secs_f64(),
-        mbps
-    );
-
-    let ratio = index_size as f64 / content_size as f64;
-    println!(
-        "Index Size: {}, Compression ratio: {:.3}",
-        bytefmt::format(index_size as u64),
-        ratio
-    );
-    println!("Index Size Breakdown:");
-
-    let header_ratio = stats.build.postings_sum.header_bytes as f64 / index_size as f64;
-    println!("\tHeaders: {:.3}", header_ratio);
-
-    let unique_successors_ratio =
-        stats.build.postings_sum.unique_successors.bytes as f64 / index_size as f64;
-    println!("\tUnique successors: {:.3}", unique_successors_ratio);
-
-    let successors_ratio = stats.build.postings_sum.successors.bytes as f64 / index_size as f64;
-    println!("\tSuccessors: {:.3}", successors_ratio);
-
-    let unique_docs_ratio = stats.build.postings_sum.unique_docs.bytes as f64 / index_size as f64;
-    println!("\tUnique Docs: {:.3}", unique_docs_ratio);
-
-    let posting_offsets_ratio = stats.build.posting_offsets_bytes as f64 / index_size as f64;
-    println!("\tPosting Offsets: {:.3}", posting_offsets_ratio);
-
-    println!("Doc count: {}", stats.extract.num_docs);
-    println!("Unique trigram count: {}", stats.extract.unique_trigrams);
 }
 
 fn search(args: SearchArgs) -> Result<()> {

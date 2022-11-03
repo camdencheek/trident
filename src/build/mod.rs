@@ -16,13 +16,6 @@ use crate::ioutil::{stream::StreamWrite, Section};
 use crate::Trigram;
 use crate::{DocID, TrigramID};
 
-pub mod serialize;
-pub mod stats;
-use serialize::U32DeltaCompressor;
-use stats::{IndexStats, SequenceStats, TrigramPostingStats};
-
-use self::stats::{BuildStats, ExtractStats};
-
 pub struct IndexBuilder {
     doc_ids: RangeFrom<DocID>,
     combined: BTreeMap<Trigram, Vec<(DocID, FxHashSet<Trigram>)>>,
