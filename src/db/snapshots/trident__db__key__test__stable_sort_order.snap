@@ -1,5 +1,5 @@
 ---
-source: src/db/mod.rs
+source: src/db/key.rs
 expression: serialized
 ---
 [
