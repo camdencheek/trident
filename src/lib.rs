@@ -2,6 +2,7 @@
 #![feature(is_sorted)]
 #![feature(split_array)]
 
+use proptest_derive::Arbitrary;
 use std::fmt;
 
 pub mod build;
@@ -14,7 +15,7 @@ pub type LocalSuccessorIdx = u32;
 pub type DocID = u32;
 pub type LocalDocIdx = u32;
 
-#[derive(Default, Eq, PartialOrd, Ord, PartialEq, Hash, Copy, Clone)]
+#[derive(Arbitrary, Default, Eq, PartialOrd, Ord, PartialEq, Hash, Copy, Clone)]
 pub struct Trigram([u8; 3]);
 
 impl fmt::Debug for Trigram {
@@ -78,23 +79,19 @@ impl TryFrom<&[u8]> for Trigram {
 #[cfg(test)]
 mod test {
     use super::*;
-    use quickcheck::{quickcheck, Arbitrary};
+    use proptest::proptest;
 
-    impl Arbitrary for Trigram {
-        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            Self([u8::arbitrary(g), u8::arbitrary(g), u8::arbitrary(g)])
+    proptest! {
+        #[test]
+        fn trigram_id_roundtrip(t: Trigram) {
+            assert!(Trigram::from(TrigramID::from(t)) == t)
         }
     }
 
-    quickcheck! {
-        fn trigram_id_roundtrip(t: Trigram) -> bool {
-            Trigram::from(TrigramID::from(t)) == t
-        }
-    }
-
-    quickcheck! {
-        fn trigram_as_u32_maintains_sort_order(t1: Trigram, t2: Trigram) -> bool {
-            t1.cmp(&t2) == u32::from(t1).cmp(&u32::from(t2))
+    proptest! {
+        #[test]
+        fn trigram_as_u32_maintains_sort_order(t1: Trigram, t2: Trigram) {
+            assert!(t1.cmp(&t2) == u32::from(t1).cmp(&u32::from(t2)))
         }
     }
 }

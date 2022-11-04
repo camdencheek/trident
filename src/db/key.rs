@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use proptest_derive::Arbitrary;
 use std::io::{self, Read, Write};
 
 use crate::ioutil::stream::{StreamRead, StreamWrite};
@@ -10,7 +11,7 @@ type OID = [u8; 20];
 type BlockID = u32;
 type DocID = u32;
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Arbitrary, PartialEq, Eq, Clone, Debug)]
 pub enum DBKey {
     Partition(PartitionID, PartitionKey),
 }
@@ -48,7 +49,7 @@ impl StreamRead for DBKey {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Arbitrary, PartialEq, Eq, Clone, Debug)]
 pub enum PartitionKey {
     Index(IndexKey),
     Contents(DocID),
@@ -84,7 +85,7 @@ impl StreamRead for PartitionKey {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Arbitrary, PartialEq, Eq, Clone, Debug)]
 pub enum IndexKey {
     TrigramPosting(Trigram, TrigramPostingKey),
 }
@@ -122,7 +123,7 @@ impl StreamRead for IndexKey {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Arbitrary, PartialEq, Eq, Clone, Debug)]
 pub enum TrigramPostingKey {
     SuccessorCount,
     MatrixCount,
@@ -174,54 +175,18 @@ impl StreamRead for TrigramPostingKey {
 
 #[cfg(test)]
 mod test {
-    use std::io::Cursor;
-
     use super::*;
     use insta::assert_debug_snapshot;
-    use quickcheck::{quickcheck, Arbitrary};
+    use proptest::proptest;
+    use std::io::Cursor;
 
-    impl Arbitrary for DBKey {
-        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            Self::Partition(PartitionID::arbitrary(g), PartitionKey::arbitrary(g))
-        }
-    }
-
-    impl Arbitrary for PartitionKey {
-        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            match u8::arbitrary(g) % 2 {
-                0 => Self::Index(IndexKey::arbitrary(g)),
-                1 => Self::Contents(DocID::arbitrary(g)),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    impl Arbitrary for IndexKey {
-        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            Self::TrigramPosting(Trigram::arbitrary(g), TrigramPostingKey::arbitrary(g))
-        }
-    }
-
-    impl Arbitrary for TrigramPostingKey {
-        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            match u8::arbitrary(g) % 6 {
-                0 => Self::SuccessorCount,
-                1 => Self::MatrixCount,
-                2 => Self::DocCount,
-                3 => Self::SuccessorsBlock(BlockID::arbitrary(g)),
-                4 => Self::MatrixBlock(BlockID::arbitrary(g)),
-                5 => Self::DocsBlock(BlockID::arbitrary(g)),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    quickcheck! {
+    proptest! {
         // Test that any DBKey can be roundtripped
-        fn db_key_roundtrip(key: DBKey) -> bool {
+        #[test]
+        fn db_key_roundtrip(key: DBKey) {
             let v = key.to_vec();
             let mut r = Cursor::new(v);
-            key == DBKey::read_from(&mut r).unwrap()
+            assert!(key == DBKey::read_from(&mut r).unwrap())
         }
     }
 
